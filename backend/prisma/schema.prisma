@@ -1,0 +1,149 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// --- Enum ---
+enum Role {
+  CLIENT
+  ADMIN
+}
+
+enum SenderType {
+  USER
+  AI
+  SYSTEM
+}
+
+// --- Models ---
+
+model User {
+  id           String   @id @default(uuid())
+  username     String?  @unique
+  email        String   @unique
+  passwordHash String
+  fullName     String?
+  avatar       String?
+  phone        String?
+  resetPasswordToken     String?
+  resetPasswordExpiresAt DateTime?
+  role         Role     @default(CLIENT)
+
+  // Personalization
+  aiTone        String?  @default("professional") // e.g., friendly, professional, concise
+  aiLanguage    String?  @default("Vietnamese")
+  aiResponseLength String? @default("balanced") // short, balanced, detailed
+  customInstructions String? // Lệnh bổ sung cố định cho mọi câu trả lời
+
+  documents Document[]
+  sessions  ChatSession[]
+}
+
+model Document {
+  id            String   @id @default(uuid())
+  userId        String
+  sessionId     String?  // Gắn tệp vào một session cụ thể (tùy chọn)
+  messageId     String?  // Gắn tệp vào một tin nhắn cụ thể
+  fileName      String // Tên file lưu trên ổ cứng (vd: 1224c42a.pdf)
+  originalName  String // Tên file gốc người dùng upload
+  filePath      String
+  mimeType      String
+  size          Int // Dung lượng (bytes)
+  extractedText String? // Chứa text OCR hoặc parse ra được
+
+  user    User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session ChatSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  message Message?     @relation(fields: [messageId], references: [id], onDelete: SetNull)
+}
+
+model ChatSession {
+  id        String   @id @default(uuid())
+  userId    String
+  agentId   String? // Session này đang xài Agent nào (nếu có)
+  title     String // Tiêu đề session sinh tự động
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agent     Agent?    @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  messages  Message[]
+  documents Document[]
+}
+
+model Message {
+  id        String     @id @default(uuid())
+  sessionId String
+  sender    SenderType
+  content   String
+
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  documents Document[]
+}
+
+model Provider {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  config    String? // JSON string để lưu api key / base url tự config
+
+  models Model[]
+}
+
+model Model {
+  id         String   @id @default(uuid())
+  providerId String
+  name       String // VD: gemini-1.5-pro, gpt-4o
+
+  provider Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+}
+
+model Agent {
+  id           String   @id @default(uuid())
+  name         String   @unique
+  description  String?
+  systemPrompt String?
+
+  sessions ChatSession[]
+  skills   AgentSkill[]
+  mcps     AgentMCP[]
+}
+
+model Skill {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  command     String? // Lệnh tương tác CLI
+
+  agents AgentSkill[]
+}
+
+model MCP {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  config      String? // JSON config file
+
+  agents AgentMCP[]
+}
+
+// Bảng trung gian (Many-to-Many)
+model AgentSkill {
+  agentId String
+  skillId String
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  skill Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@id([agentId, skillId])
+}
+
+model AgentMCP {
+  agentId String
+  mcpId   String
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  mcp   MCP   @relation(fields: [mcpId], references: [id], onDelete: Cascade)
+
+  @@id([agentId, mcpId])
+}

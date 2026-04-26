@@ -10,6 +10,11 @@ function getEnv(name: string, fallback?: string): string {
   return value
 }
 
+function getOptionalEnv(name: string) {
+  const value = process.env[name]?.trim()
+  return value && value.length > 0 ? value : undefined
+}
+
 export const env = {
   nodeEnv: getEnv('NODE_ENV', 'development'),
   port: Number(getEnv('PORT', '8080')),
@@ -30,7 +35,17 @@ export const env = {
   geminiCliCommand: getEnv('GEMINI_CLI_COMMAND', 'gemini --model={model}'),
   opencodeCliCommand: getEnv('OPENCODE_CLI_COMMAND', 'opencode --model={model}'),
   cliTimeoutMs: Number(getEnv('CLI_TIMEOUT_MS', '0')),
-  userDocsRoot: getEnv('USER_DOCS_ROOT', 'D:\\Projects\\user_docs'),
+  userDocsRoot: getEnv('USER_DOCS_ROOT', 'D:\\Projects\\user_docs\\store'),
+  sandboxBrokerUrl: getEnv('SANDBOX_BROKER_URL', 'http://127.0.0.1:8091'),
+  sandboxBrokerHost: getEnv('SANDBOX_BROKER_HOST', '127.0.0.1'),
+  sandboxBrokerPort: Number(getEnv('SANDBOX_BROKER_PORT', '8091')),
+  sandboxBrokerToken: getEnv('SANDBOX_BROKER_TOKEN', 'dev-sandbox-token'),
+  sandboxBrokerRequestTimeoutMs: Number(
+    getEnv('SANDBOX_BROKER_REQUEST_TIMEOUT_MS', getEnv('CLI_TIMEOUT_MS', '120000')),
+  ),
+  sandboxRoot: getEnv('SANDBOX_ROOT', 'D:\\Projects\\user_docs\\sandbox'),
+  sandboxJobTtlMs: Number(getEnv('SANDBOX_JOB_TTL_MS', '86400000')),
+  deploymentRole: getOptionalEnv('DEPLOYMENT_ROLE') || 'full',
 }
 
 export const isProduction = env.nodeEnv === 'production'

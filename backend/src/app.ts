@@ -5,11 +5,14 @@ import cookieParser from 'cookie-parser'
 import helmet from 'helmet'
 import passport from './config/passport.js'
 import { env } from './config/env.js'
+import { ensureStorageDirectories, validateStorageConfiguration } from './config/storage.js'
 import authRouter from './routes/auth.routes.js'
 import chatRouter from './routes/chat.routes.js'
 import documentRouter from './routes/document.routes.js'
 
 dotenv.config()
+validateStorageConfiguration()
+ensureStorageDirectories()
 
 const app = express()
 

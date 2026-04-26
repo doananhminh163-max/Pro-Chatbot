@@ -70,7 +70,9 @@ Lưu ý quan trọng:
 
 - `backend/src/config/env.ts` đang đọc hầu hết biến môi trường ở chế độ bắt buộc.
 - Dù chưa dùng Google OAuth hoặc SMTP ngay, bạn vẫn phải khai báo giá trị cho các biến liên quan để backend khởi động.
-- `USER_DOCS_ROOT` cần trỏ tới thư mục có quyền ghi.
+- `USER_DOCS_ROOT` cần trỏ tới vùng lưu trữ thật của tài liệu người dùng, ví dụ `D:\Projects\user_docs\store`.
+- `SANDBOX_ROOT` cần trỏ tới vùng làm việc tạm của broker, ví dụ `D:\Projects\user_docs\sandbox`.
+- Không cấu hình `SANDBOX_ROOT` trỏ vào cùng cây thư mục với `USER_DOCS_ROOT`.
 
 ### Bước 3: generate Prisma client
 
@@ -101,7 +103,9 @@ Frontend mặc định chạy tại `http://localhost:5173`, backend tại `http
 3. Nếu file đang ở thư mục gốc người dùng, backend sẽ di chuyển vật lý vào thư mục của session.
 4. Backend tạo `Message` của người dùng và gắn `Document` vào message đó.
 5. Backend dựng prompt từ lịch sử 20 tin nhắn gần nhất + personalization.
-6. Backend gọi CLI AI, nhận kết quả và lưu phản hồi thành `Message` của AI hoặc `SYSTEM`.
+6. Backend copy attachment sang `SANDBOX_ROOT/jobs/<jobId>` và tạo `attachments-context.txt`.
+7. Backend gọi sandbox broker nội bộ, broker chỉ làm việc trong workspace tạm đó.
+8. Backend nhận kết quả và lưu phản hồi thành `Message` của AI hoặc `SYSTEM`.
 
 ### Xóa session
 
@@ -127,11 +131,12 @@ Seed hiện không tạo sẵn tài khoản admin hoặc user mẫu.
 - [docs/API.md](./docs/API.md)
 - [docs/UI_DESIGN.md](./docs/UI_DESIGN.md)
 - [docs/SETUP.md](./docs/SETUP.md)
+- [docs/SANDBOX_BROKER_SPEC.md](./docs/SANDBOX_BROKER_SPEC.md)
 
 ## 9. Ghi chú kỹ thuật cần biết
 
-- Backend được viết thiên về môi trường Windows vì phần thực thi CLI dùng `powershell.exe`.
-- Lệnh CLI nhận prompt qua cờ `--prompt`; nội dung nhiều dòng được escape thành `\n`.
-- Nếu có file đính kèm, PowerShell sẽ `Get-Content -Raw` rồi pipe nội dung vào CLI.
+- Backend hiện dùng mô hình `main backend` + `sandbox broker` nội bộ cho thực thi CLI.
+- Tài liệu thật của người dùng phải nằm trong `USER_DOCS_ROOT` và tách biệt khỏi `SANDBOX_ROOT`.
+- Broker chỉ nên được cấp quyền trên `SANDBOX_ROOT`, không trên `USER_DOCS_ROOT`.
 - API chat chấp nhận `provider: gemini | opencode`, nhưng seed mặc định chỉ có `gemini`.
 - Trên giao diện, nhiều màn admin dùng dữ liệu cứng để mô phỏng tương lai, không phản ánh dữ liệu thật từ database.

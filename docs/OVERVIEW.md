@@ -35,17 +35,21 @@ Mỗi phiên chat được lưu thành một `ChatSession`, có tiêu đề riê
 
 ### Quản lý tài liệu theo người dùng và phiên
 
-Tài liệu được lưu ra filesystem theo cây thư mục:
+Tài liệu được lưu ra filesystem theo cây thư mục lưu trữ thật:
 
 ```text
-USER_DOCS_ROOT/
-└── <userId>/
-    ├── <file>
-    └── <sessionId>/
-        └── <file>
+D:\Projects\user_docs\
+├── store\
+│   └── <userId>\
+│       ├── <file>
+│       └── <sessionId>\
+│           └── <file>
+└── sandbox\
+    └── jobs\
+        └── <jobId>\
 ```
 
-Điểm đặc biệt là khi người dùng gửi tin nhắn có đính kèm file, backend có thể di chuyển file vật lý từ thư mục người dùng sang thư mục của session tương ứng để đồng bộ trạng thái lưu trữ.
+Điểm đặc biệt là khi người dùng gửi tin nhắn có đính kèm file, backend có thể di chuyển file vật lý từ thư mục người dùng sang thư mục của session tương ứng để đồng bộ trạng thái lưu trữ. Sau đó backend copy attachment sang workspace sandbox riêng cho broker. Broker không được làm việc trực tiếp trong cây `store`.
 
 ### Cá nhân hóa AI
 
@@ -101,8 +105,9 @@ Các trường này được backend chèn vào prompt khi gọi CLI, giúp ph�
 
 1. Người dùng đính kèm file ở Chat hoặc upload từ Documents.
 2. Nếu file đang ở mức global của user, backend sẽ chuyển file vào thư mục session khi tin nhắn được gửi.
-3. Backend gửi nội dung prompt và pipe nội dung file vào CLI.
-4. Kết quả được lưu thành `Message` của AI.
+3. Backend copy attachment sang `D:\Projects\user_docs\sandbox\jobs\<jobId>`.
+4. Broker chỉ đọc bản copy trong sandbox hoặc `attachments-context.txt` do backend chuẩn bị.
+5. Kết quả được lưu thành `Message` của AI.
 
 ### Luồng 3: tiếp tục công việc cũ
 
@@ -118,7 +123,7 @@ Các trường này được backend chèn vào prompt khi gọi CLI, giúp ph�
 - Chưa có cơ chế phân quyền admin riêng ở tầng API ngoài việc kiểm tra role ở frontend routing.
 - Chưa có parser/OCR thật cho `pdf`, `docx`, `xlsx` dù dependency đã được cài.
 - Chưa có fallback thực giữa nhiều provider trong `chat.service.ts`.
-- Hệ thống thiên về môi trường Windows do cách dựng lệnh qua PowerShell.
+- Hệ thống thiên về môi trường Windows và phụ thuộc vào việc cấu hình ACL đúng giữa `store` và `sandbox`.
 
 ## 7. Khi nào nên đọc tiếp tài liệu nào
 
@@ -127,3 +132,4 @@ Các trường này được backend chèn vào prompt khi gọi CLI, giúp ph�
 - Muốn tích hợp hoặc test API: xem `API.md`
 - Muốn chạy dự án và cấu hình môi trường: xem `SETUP.md`
 - Muốn nắm trạng thái màn hình frontend: xem `UI_DESIGN.md`
+- Muốn hiểu về sandbox broker: xem `SANDBOX_BROKER_SPEC.md`

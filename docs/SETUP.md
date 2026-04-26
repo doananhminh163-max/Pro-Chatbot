@@ -86,11 +86,13 @@ DATABASE_URL="file:./prisma/dev.db"
 #### File storage
 
 - `USER_DOCS_ROOT`
+- `SANDBOX_ROOT`
 
 Ví dụ:
 
 ```env
-USER_DOCS_ROOT=D:\Projects\user_docs
+USER_DOCS_ROOT=D:\Projects\user_docs\store
+SANDBOX_ROOT=D:\Projects\user_docs\sandbox
 ```
 
 ## 4. Điều rất quan trọng về `.env`
@@ -155,19 +157,37 @@ Seed không tạo user mẫu.
 
 ## 8. Đường dẫn và lưu trữ tài liệu
 
-`USER_DOCS_ROOT` là thư mục gốc chứa toàn bộ file người dùng.
+`D:\Projects\user_docs` nên là thư mục gốc chung, nhưng phải tách thành hai vùng:
+
+- `store`: tài liệu thật của người dùng
+- `sandbox`: workspace tạm cho broker
+
+`USER_DOCS_ROOT` là vùng storage thật của file người dùng.
 
 Cấu trúc lưu trữ:
 
 ```text
-<USER_DOCS_ROOT>/
-└── <userId>/
-    ├── <uploaded-file>
-    └── <sessionId>/
-        └── <uploaded-file>
+D:\Projects\user_docs\
+├── store\
+│   └── <userId>\
+│       ├── <uploaded-file>
+│       └── <sessionId>\
+│           └── <uploaded-file>
+└── sandbox\
+    └── jobs\
+        └── <jobId>\
+            ├── manifest.json
+            ├── attachments-context.txt
+            └── input\
 ```
 
-Nếu thư mục này không tồn tại, backend sẽ tự tạo khi upload.
+Nguyên tắc bắt buộc:
+
+- broker không làm việc trực tiếp trong `store`
+- broker chỉ làm việc trong `sandbox`
+- không cấu hình `USER_DOCS_ROOT` và `SANDBOX_ROOT` trỏ chồng lên nhau
+
+Nếu các thư mục này không tồn tại, backend hoặc broker sẽ tự tạo thư mục con cần thiết khi chạy.
 
 ## 9. Cấu hình CLI
 
@@ -221,6 +241,7 @@ Nguyên nhân thường gặp:
 - thiếu biến môi trường bắt buộc;
 - `JWT_SECRET` chưa khai báo;
 - `USER_DOCS_ROOT` không có quyền ghi;
+- `SANDBOX_ROOT` không có quyền ghi;
 - Prisma client chưa generate.
 
 ### Đăng nhập Google lỗi
@@ -252,7 +273,8 @@ Kiểm tra:
 
 ## 12. Khuyến nghị vận hành
 
-- Tách `USER_DOCS_ROOT` ra ngoài thư mục source code.
+- Tách `USER_DOCS_ROOT` và `SANDBOX_ROOT` ra ngoài thư mục source code.
+- Dùng layout `D:\Projects\user_docs\store` và `D:\Projects\user_docs\sandbox` thay vì cho broker làm việc trực tiếp trên thư mục tài liệu thật.
 - Không lưu secret trực tiếp trong frontend.
 - Dùng giá trị `JWT_SECRET` mạnh ở môi trường thật.
 - Thêm backup định kỳ cho SQLite và thư mục tài liệu nếu dùng dữ liệu thật.

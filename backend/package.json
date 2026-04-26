@@ -7,7 +7,9 @@
   "main": "src/app.ts",
   "scripts": {
     "dev": "npm run seed && tsx watch --clear-screen=false ./src/app.ts",
+    "dev:broker": "tsx watch --clear-screen=false ./src/broker/app.ts",
     "start": "tsx ./src/app.ts",
+    "start:broker": "tsx ./src/broker/app.ts",
     "build": "tsc --noEmit",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",

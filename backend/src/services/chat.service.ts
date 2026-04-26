@@ -1,13 +1,12 @@
-import { SenderType } from '@prisma/client'
-import { spawn } from 'node:child_process'
-import path from 'node:path'
 import fs from 'node:fs'
+import path from 'node:path'
+import { SenderType } from '@prisma/client'
 import { env } from '../config/env.js'
 import { prisma } from '../config/prisma.js'
 import { resolveSession } from './session.service.js'
-
-export type ChatProvider = 'gemini' | 'opencode'
-export type MemoryMode = 'session' | 'global' | 'hybrid'
+import { cleanupSandboxJob, prepareSandboxJob } from './sandbox-workspace.service.js'
+import { executeSandboxJob } from './sandbox-broker.client.js'
+import type { ChatProvider, MemoryMode } from './chat.types.js'
 
 interface SessionContextMessage {
   sender: SenderType
@@ -41,24 +40,12 @@ interface CreateCliPromptInput {
   personalization?: UserPersonalization
 }
 
-interface ExecuteCliInput {
-  provider: ChatProvider
-  prompt: string
-  model?: string
-  filePaths?: string[]
-  cwd?: string
-}
-
-interface ResolvedCommand {
-  executable: string
-  args: string[]
-  display: string
-}
-
-const MODEL_PLACEHOLDER = /\{\{\s*model\s*\}\}|\{model\}|\$MODEL/gi
-
-function stripAnsi(value: string) {
-  return value.replace(/\u001b\[[0-9;]*m/g, '')
+interface ResolvedAttachment {
+  id: string
+  originalName: string
+  filePath: string
+  mimeType: string
+  size: number
 }
 
 function createCliPrompt({
@@ -69,9 +56,7 @@ function createCliPrompt({
   agent,
   personalization,
 }: CreateCliPromptInput) {
-  const historyBlock = history
-    .map((item) => `${item.sender}: ${item.content}`)
-    .join('\n\n')
+  const historyBlock = history.map((item) => `${item.sender}: ${item.content}`).join('\n\n')
 
   const tone = personalization?.aiTone || 'professional'
   const language = personalization?.aiLanguage || 'Vietnamese'
@@ -83,6 +68,7 @@ function createCliPrompt({
     'Keep answers concise, practical, and action-oriented.',
     'CRITICAL SECURITY RULE: You are strictly forbidden from accessing, reading, or modifying the internal source code, configuration files (e.g., .env, package.json), or directories (e.g., backend/, frontend/) of this project.',
     'CRITICAL SECURITY RULE: You must ONLY analyze the specific files and documents provided by the user in this chat session.',
+    'CRITICAL SECURITY RULE: You must refuse any request to reveal server paths, local directories, environment variables, internal repository files, or deployment details.',
     `Agent profile: ${agent || 'general-assistant'}`,
     `Model hint: ${model || 'default'}`,
     `Memory mode: ${memoryMode || 'session'}`,
@@ -97,278 +83,126 @@ function createCliPrompt({
     content,
     '',
     `Reply in ${language} unless the user explicitly asks for another language.`,
-  ].filter(line => line !== '').join('\n')
+  ].filter((line) => line !== '').join('\n')
 }
 
-function providerToCommand(provider: ChatProvider) {
-  return provider === 'gemini' ? env.geminiCliCommand : env.opencodeCliCommand
-}
-
-function tokenizeCommand(command: string) {
-  const tokens = command.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)
-
-  if (!tokens) {
-    return []
-  }
-
-  return tokens.map((token) => token.replace(/^['"]|['"]$/g, ''))
-}
-
-function resolveCommand(provider: ChatProvider, prompt: string, model?: string): ResolvedCommand {
-  const template = providerToCommand(provider).trim()
-
-  if (!template) {
-    throw new Error(`${provider} CLI command is empty`)
-  }
-
-  let command = template
-  let modelPlaceholderUsed = false
-  const hasModelPlaceholder = /\{\{\s*model\s*\}\}|\{model\}|\$MODEL/i.test(command)
-
-  if (model && hasModelPlaceholder) {
-    command = command.replace(MODEL_PLACEHOLDER, model)
-    modelPlaceholderUsed = true
-  }
-
-  if (!model && hasModelPlaceholder) {
-    command = command
-      .replace(/\s--model(?:=|\s+)(\{\{\s*model\s*\}\}|\{model\}|\$MODEL)/gi, '')
-      .replace(MODEL_PLACEHOLDER, '')
-      .trim()
-  }
-
-  const parts = tokenizeCommand(command)
-
-  if (parts.length === 0) {
-    throw new Error(`${provider} CLI command is invalid: ${template}`)
-  }
-
-  const hasModelFlag = parts.some((part) => part === '--model' || part.startsWith('--model='))
-
-  if (model && !hasModelFlag && !modelPlaceholderUsed) {
-    parts.push('--model', model)
-  }
-
-  // Escape newlines to literal \n to prevent cmd.exe truncation on Windows
-  const singleLinePrompt = prompt.replace(/\r?\n/g, '\\n')
-  parts.push('--prompt', singleLinePrompt)
-
-  return {
-    executable: parts[0],
-    args: parts.slice(1),
-    display: [parts[0], ...parts.slice(1)].join(' '),
-  }
-}
-
-async function executeCliCommand({ provider, prompt, model, filePaths, cwd }: ExecuteCliInput) {
-  const command = resolveCommand(provider, prompt, model)
-
-  return new Promise<string>((resolve, reject) => {
-    let executable = command.executable
-    let args = command.args
-
-    if (process.platform === 'win32') {
-      executable = 'powershell.exe'
-
-      const promptArg = args[args.indexOf('--prompt') + 1]
-      const modelIdx = args.indexOf('--model')
-      const modelFlag = modelIdx !== -1 ? `${args[modelIdx]} '${args[modelIdx + 1]}'` : ''
-
-      let psCommand = ''
-      const targetCwd = cwd || process.cwd()
-
-      // Thực hiện cd vào thư mục session trước, sau đó mới gọi CLI
-      const cdCommand = `Set-Location -Path '${targetCwd.replace(/'/g, "''")}';`
-
-      if (filePaths && filePaths.length > 0) {
-        const paths = filePaths.map(p => `"${p}"`).join(', ')
-        psCommand = `${cdCommand} Get-Content -Path ${paths} -Raw | ${command.executable} ${modelFlag} --prompt '${promptArg.replace(/'/g, "''")}'`
-      } else {
-        psCommand = `${cdCommand} ${command.executable} ${modelFlag} --prompt '${promptArg.replace(/'/g, "''")}'`
-      }
-
-      args = [
-        '-NoProfile',
-        '-Command',
-        psCommand
-      ]
-    }
-
-    const processEnv = { ...process.env };
-    // Loại bỏ các biến môi trường có thể gây lộ thông tin dự án hoặc khiến CLI tự tìm project root
-    delete processEnv.NODE_OPTIONS;
-    delete processEnv.npm_config_prefix;
-
-    const processHandle = spawn(executable, args, {
-      shell: false,
-      windowsHide: true,
-      cwd: cwd || process.cwd(),
-      env: processEnv,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-
-    let stdout = ''
-    let stderr = ''
-    let timedOut = false
-
-    const timeout = env.cliTimeoutMs > 0
-      ? setTimeout(() => {
-        timedOut = true
-        processHandle.kill('SIGTERM')
-      }, env.cliTimeoutMs)
-      : null
-
-    processHandle.stdout.on('data', (chunk: Buffer | string) => {
-      stdout += chunk.toString()
-    })
-
-    processHandle.stderr.on('data', (chunk: Buffer | string) => {
-      stderr += chunk.toString()
-    })
-
-    processHandle.on('error', (error) => {
-      if (timeout) clearTimeout(timeout)
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        reject(new Error(`${provider} CLI not found. Checked command: ${command.display}`))
-        return
-      }
-
-      reject(error)
-    })
-
-    processHandle.on('close', (code) => {
-      if (timeout) clearTimeout(timeout)
-
-      if (timedOut) {
-        reject(new Error(`${provider} CLI timed out after ${env.cliTimeoutMs}ms`))
-        return
-      }
-
-      const output = stripAnsi((stdout || '').trim())
-      const errorOutput = stripAnsi((stderr || '').trim())
-
-      if (code !== 0) {
-        reject(new Error(errorOutput || output || `${provider} CLI exited with code ${code ?? 'unknown'}`))
-        return
-      }
-
-      const resolvedOutput = output || errorOutput
-
-      if (!resolvedOutput) {
-        reject(new Error(`${provider} CLI returned empty output`))
-        return
-      }
-
-      resolve(resolvedOutput)
-    })
+async function resolveAndRelocateAttachments(userId: string, sessionId: string, attachmentIds: string[]) {
+  const docs = await prisma.document.findMany({
+    where: {
+      id: { in: attachmentIds },
+      userId,
+    },
   })
-}
 
-async function generateReply(
-  provider: ChatProvider,
-  prompt: string,
-  model?: string,
-  filePaths?: string[],
-  cwd?: string,
-): Promise<{ reply: string; usedProvider: ChatProvider; fallbackUsed: boolean }> {
-  const reply = await executeCliCommand({ provider, prompt, model, filePaths, cwd })
-  return { reply, usedProvider: provider, fallbackUsed: false }
+  if (docs.length !== attachmentIds.length) {
+    throw new Error('One or more attachments were not found')
+  }
+
+  const sessionDir = path.join(env.userDocsRoot, userId, sessionId)
+  if (!fs.existsSync(sessionDir)) {
+    fs.mkdirSync(sessionDir, { recursive: true })
+  }
+
+  const resolvedAttachments: ResolvedAttachment[] = []
+
+  for (const doc of docs) {
+    const currentPath = doc.filePath
+    const fileName = path.basename(currentPath)
+    const newPath = path.join(sessionDir, fileName)
+
+    if (currentPath !== newPath && fs.existsSync(currentPath)) {
+      try {
+        const sourceDir = path.dirname(currentPath)
+        fs.renameSync(currentPath, newPath)
+
+        await prisma.document.update({
+          where: { id: doc.id },
+          data: {
+            sessionId,
+            filePath: newPath,
+          },
+        })
+
+        if (path.basename(sourceDir) === 'general' && fs.readdirSync(sourceDir).length === 0) {
+          fs.rmdirSync(sourceDir)
+        }
+
+        resolvedAttachments.push({
+          id: doc.id,
+          originalName: doc.originalName,
+          filePath: newPath,
+          mimeType: doc.mimeType,
+          size: doc.size,
+        })
+      } catch (renameError) {
+        console.error(`[chat.service] Failed to move file from ${currentPath} to ${newPath}`, renameError)
+        resolvedAttachments.push({
+          id: doc.id,
+          originalName: doc.originalName,
+          filePath: currentPath,
+          mimeType: doc.mimeType,
+          size: doc.size,
+        })
+      }
+    } else {
+      if (doc.sessionId !== sessionId) {
+        await prisma.document.update({
+          where: { id: doc.id },
+          data: { sessionId },
+        })
+      }
+
+      resolvedAttachments.push({
+        id: doc.id,
+        originalName: doc.originalName,
+        filePath: currentPath,
+        mimeType: doc.mimeType,
+        size: doc.size,
+      })
+    }
+  }
+
+  return resolvedAttachments
 }
 
 export async function sendMessage(input: SendMessageInput) {
   const rawContent = input.content.trim()
   const hasAttachments = input.attachmentIds && input.attachmentIds.length > 0
-
-  // Mặc định prompt nếu trống và có file
   const content = rawContent || (hasAttachments ? 'đọc và tổng hợp lại' : '')
 
   if (!content) {
     throw new Error('Message content is required')
   }
 
-  // Lấy info user để lấy personalization
   const user = await prisma.user.findUnique({
     where: { id: input.userId },
     select: {
       aiTone: true,
       aiLanguage: true,
       aiResponseLength: true,
-      customInstructions: true
-    }
+      customInstructions: true,
+    },
   })
 
   const session = await resolveSession(input.userId, input.sessionId, content)
-
-  // 1. Luôn xác định và tạo thư mục session vật lý
-  const sessionDir = path.join(env.userDocsRoot, input.userId, session.id)
-  if (!fs.existsSync(sessionDir)) {
-    fs.mkdirSync(sessionDir, { recursive: true })
-  }
-
-  // Lấy đường dẫn file nếu có
-  let filePaths: string[] = []
-  if (hasAttachments && input.attachmentIds) {
-    // 2. Lấy danh sách tài liệu
-    const docs = await prisma.document.findMany({
-      where: {
-        id: { in: input.attachmentIds },
-        userId: input.userId
-      }
-    })
-
-    for (const doc of docs) {
-      const currentPath = doc.filePath
-      const fileName = path.basename(currentPath)
-      const newPath = path.join(sessionDir, fileName)
-
-      if (currentPath !== newPath && fs.existsSync(currentPath)) {
-        try {
-          const sourceDir = path.dirname(currentPath)
-          fs.renameSync(currentPath, newPath)
-
-          // Cập nhật lại đường dẫn mới trong database
-          await prisma.document.update({
-            where: { id: doc.id },
-            data: {
-              sessionId: session.id,
-              filePath: newPath
-            }
-          })
-          filePaths.push(newPath)
-
-          // Nếu thư mục cũ trống và không phải là thư mục gốc của user, hãy xóa nó
-          if (path.basename(sourceDir) === 'general' && fs.readdirSync(sourceDir).length === 0) {
-            fs.rmdirSync(sourceDir)
-          }
-        } catch (renameError) {
-          console.error(`[chat.service] Failed to move file from ${currentPath} to ${newPath}`, renameError)
-          filePaths.push(currentPath)
-        }
-      } else {
-        // Nếu đã đúng chỗ thì chỉ cập nhật database sessionId (nếu cần)
-        if (doc.sessionId !== session.id) {
-          await prisma.document.update({
-            where: { id: doc.id },
-            data: { sessionId: session.id }
-          })
-        }
-        filePaths.push(currentPath)
-      }
-    }
-  }
+  const resolvedAttachments = hasAttachments && input.attachmentIds
+    ? await resolveAndRelocateAttachments(input.userId, session.id, input.attachmentIds)
+    : []
 
   const userMessage = await prisma.message.create({
     data: {
       sessionId: session.id,
       sender: SenderType.USER,
       content,
-      documents: hasAttachments && input.attachmentIds ? {
-        connect: input.attachmentIds.map(id => ({ id }))
-      } : undefined
+      documents: hasAttachments && input.attachmentIds
+        ? {
+            connect: input.attachmentIds.map((id) => ({ id })),
+          }
+        : undefined,
     },
     include: {
-      documents: true
-    }
+      documents: true,
+    },
   })
 
   const recentMessages = await prisma.message.findMany({
@@ -392,22 +226,46 @@ export async function sendMessage(input: SendMessageInput) {
       aiTone: user?.aiTone,
       aiLanguage: user?.aiLanguage,
       aiResponseLength: user?.aiResponseLength,
-      customInstructions: user?.customInstructions
-    }
+      customInstructions: user?.customInstructions,
+    },
   })
 
-  let assistantMessage = null as {
+  let assistantMessage: {
     id: string
     sessionId: string
     sender: SenderType
     content: string
-  } | null
+  } | null = null
 
   let usedProvider: ChatProvider | null = null
   let fallbackUsed = false
+  let sandboxJobId: string | null = null
 
   try {
-    const generated = await generateReply(input.provider, prompt, input.model, filePaths, sessionDir)
+    const sandboxJob = await prepareSandboxJob({
+      userId: input.userId,
+      sessionId: session.id,
+      provider: input.provider,
+      prompt,
+      model: input.model,
+      attachments: resolvedAttachments.map((attachment) => ({
+        documentId: attachment.id,
+        originalName: attachment.originalName,
+        filePath: attachment.filePath,
+        mimeType: attachment.mimeType,
+        size: attachment.size,
+      })),
+    })
+
+    sandboxJobId = sandboxJob.jobId
+
+    const generated = await executeSandboxJob({
+      jobId: sandboxJob.jobId,
+      provider: input.provider,
+      prompt,
+      model: input.model,
+    })
+
     usedProvider = generated.usedProvider
     fallbackUsed = generated.fallbackUsed
 
@@ -426,6 +284,14 @@ export async function sendMessage(input: SendMessageInput) {
         content: `CLI execution failed: ${(error as Error).message}`,
       },
     })
+  } finally {
+    if (sandboxJobId) {
+      try {
+        await cleanupSandboxJob(sandboxJobId)
+      } catch (cleanupError) {
+        console.error(`[chat.service] Failed to cleanup sandbox job ${sandboxJobId}`, cleanupError)
+      }
+    }
   }
 
   return {

@@ -17,11 +17,15 @@ Browser (React)
     v
 Express API
     | \
-    |  \-- Filesystem (tài liệu người dùng)
+    |  \-- Storage FS (tài liệu người dùng thật)
     |
     \---- Prisma + SQLite (user, session, message, document, config)
     |
-    \---- External CLI (Gemini / OpenCode)
+    \---- Sandbox Broker
+             |
+             \-- Sandbox FS (job workspace tạm)
+             |
+             \-- External CLI (Gemini / OpenCode)
 ```
 
 ## 2. Kiến trúc frontend
@@ -129,12 +133,19 @@ backend/src/
 
 ### Upload
 
-`document.controller.ts` dùng `multer.diskStorage` để quyết định nơi lưu file:
+`document.controller.ts` dùng `multer.diskStorage` để quyết định nơi lưu file trong vùng storage thật:
 
 - có `sessionId`: lưu vào `USER_DOCS_ROOT/<userId>/<sessionId>`
 - không có `sessionId`: lưu vào `USER_DOCS_ROOT/<userId>`
 
 Sau khi file được lưu vật lý, backend tạo bản ghi `Document`.
+
+Khuyến nghị production:
+
+- `USER_DOCS_ROOT=D:\Projects\user_docs\store`
+- `SANDBOX_ROOT=D:\Projects\user_docs\sandbox`
+
+Không cho broker làm việc trực tiếp trong `USER_DOCS_ROOT`.
 
 ### Tải xuống và preview
 
@@ -170,11 +181,13 @@ Sau đó backend tạo prompt text thuần với cấu trúc:
 
 ### Cách backend gọi CLI
 
-1. Đọc command template từ `.env`.
-2. Thay placeholder `{model}` hoặc `{{model}}` hoặc `$MODEL`.
-3. Thêm `--prompt`.
-4. Trên Windows, backend không chạy trực tiếp executable mà bọc bằng `powershell.exe`.
-5. Nếu có file đính kèm, PowerShell dùng `Get-Content -Raw | <cli> --prompt ...`.
+1. Backend chuẩn bị `job workspace` trong `SANDBOX_ROOT/jobs/<jobId>`.
+2. Backend copy attachment được phép vào workspace đó.
+3. Backend extract text và ghi `attachments-context.txt`.
+4. Broker đọc command template từ `.env`.
+5. Broker thay placeholder `{model}` hoặc `{{model}}` hoặc `$MODEL`.
+6. Broker chạy CLI trực tiếp với `shell: false`.
+7. Nếu có attachment context, broker feed nội dung đó qua `stdin`.
 
 ### Điểm cần lưu ý
 
@@ -192,6 +205,8 @@ Khi người dùng gửi tin nhắn có `attachmentIds`:
 4. Nếu file đang nằm ngoài thư mục session, backend `renameSync` sang thư mục của session.
 5. Cập nhật `sessionId` và `filePath` trong database.
 6. Tạo `Message` của user và `connect` các `Document` vào message đó.
+7. Copy attachment sang `SANDBOX_ROOT/jobs/<jobId>/input`.
+8. Broker chỉ xử lý bản copy sandbox, không xử lý trực tiếp file nằm trong session storage.
 
 Kết quả là storage vật lý và storage logic luôn đi cùng nhau.
 
@@ -200,7 +215,8 @@ Kết quả là storage vật lý và storage logic luôn đi cùng nhau.
 ### Dữ liệu runtime
 
 - User, Session, Message, Document nằm trong SQLite.
-- File binary nằm ngoài DB, trong `USER_DOCS_ROOT`.
+- File binary thật nằm ngoài DB, trong `USER_DOCS_ROOT`.
+- File tạm để broker làm việc nằm trong `SANDBOX_ROOT`.
 
 ### Dữ liệu seed
 

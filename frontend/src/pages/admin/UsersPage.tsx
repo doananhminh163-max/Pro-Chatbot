@@ -3,7 +3,6 @@ import AdminCrudTable from '../../components/AdminCrudTable'
 const columns = [
   { key: 'username', label: 'Username' },
   { key: 'email', label: 'Email' },
-  { key: 'status', label: 'Status' },
   { key: 'role', label: 'Role' },
   { key: 'storage', label: 'Storage Usage' },
 ]
@@ -39,7 +38,6 @@ export default function UsersPage() {
   return (
     <AdminCrudTable
       title="User Management"
-      subtitle="Create, lock, reset, and remove client accounts safely"
       columns={columns}
       rows={rows}
       addLabel="Create User"

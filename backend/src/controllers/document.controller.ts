@@ -1,24 +1,27 @@
 import type { Request, Response } from 'express'
 import multer from 'multer'
-import path from 'node:path'
 import fs from 'node:fs'
-import { createDocument, listUserDocuments, findDocumentById, deleteDocument, deleteAllUserDocuments } from '../services/document.service.js'
-import { env } from '../config/env.js'
+import {
+  createDocument,
+  listUserDocuments,
+  findDocumentById,
+  deleteDocument,
+  deleteAllUserDocuments,
+} from '../services/document.service.js'
+import { ensureSandboxMarkdownForDocument, getStoreSessionDir } from '../services/document-storage.service.js'
 
-// --- Setup Multer Storage ---
+const MAX_UPLOAD_FILE_SIZE = 20 * 1024 * 1024
+
 const storage = multer.diskStorage({
   destination: (req, _file, cb) => {
     const userId = req.auth?.sub || 'anonymous'
     const sessionId = req.body.sessionId
-    
-    // Nếu có sessionId thì vào folder session, nếu không thì ở ngay folder user
-    const uploadPath = sessionId 
-      ? path.join(env.userDocsRoot, userId, sessionId)
-      : path.join(env.userDocsRoot, userId)
+    const uploadPath = getStoreSessionDir(userId, sessionId)
 
     if (!fs.existsSync(uploadPath)) {
       fs.mkdirSync(uploadPath, { recursive: true })
     }
+
     cb(null, uploadPath)
   },
   filename: (_req, file, cb) => {
@@ -27,12 +30,45 @@ const storage = multer.diskStorage({
   },
 })
 
-export const upload = multer({ storage })
+const upload = multer({
+  storage,
+  limits: {
+    fileSize: MAX_UPLOAD_FILE_SIZE,
+  },
+})
 
-// --- Handlers ---
+export function uploadSingleDocument(request: Request, response: Response, next: (error?: unknown) => void) {
+  upload.single('file')(request, response, (error) => {
+    if (!error) {
+      next()
+      return
+    }
+
+    if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
+      response.status(400).json({
+        message: 'File uploads are limited to 20 MB per file.',
+      })
+      return
+    }
+
+    next(error)
+  })
+}
 
 function getUserId(request: Request) {
   return request.auth?.sub
+}
+
+function cleanupUploadedFile(filePath: string) {
+  if (!fs.existsSync(filePath)) {
+    return
+  }
+
+  try {
+    fs.unlinkSync(filePath)
+  } catch (error) {
+    console.error(`[document.controller] Failed to cleanup uploaded file ${filePath}`, error)
+  }
 }
 
 export async function uploadDocumentHandler(request: Request, response: Response) {
@@ -61,9 +97,24 @@ export async function uploadDocumentHandler(request: Request, response: Response
       size: file.size,
     })
 
+    try {
+      await ensureSandboxMarkdownForDocument({
+        userId,
+        sessionId: sessionId || undefined,
+        documentId: document.id,
+        originalName: document.originalName,
+        filePath: document.filePath,
+        mimeType: document.mimeType,
+      })
+    } catch (error) {
+      await deleteDocument(document.id, userId)
+      throw error
+    }
+
     response.status(201).json(document)
   } catch (error) {
-    response.status(500).json({ message: 'Failed to save document' })
+    cleanupUploadedFile(file.path)
+    response.status(400).json({ message: (error as Error).message || 'Failed to extract document to markdown' })
   }
 }
 
@@ -78,7 +129,7 @@ export async function listDocumentsHandler(request: Request, response: Response)
   try {
     const documents = await listUserDocuments(userId)
     response.status(200).json(documents)
-  } catch (error) {
+  } catch {
     response.status(500).json({ message: 'Failed to fetch documents' })
   }
 }
@@ -106,7 +157,7 @@ export async function downloadDocumentHandler(request: Request, response: Respon
     }
 
     response.download(doc.filePath, doc.originalName)
-  } catch (error) {
+  } catch {
     response.status(500).json({ message: 'Failed to download document' })
   }
 }
@@ -133,9 +184,8 @@ export async function previewDocumentHandler(request: Request, response: Respons
       return
     }
 
-    // Gửi file về trình duyệt để xem trực tiếp (không ép tải về)
     response.sendFile(doc.filePath)
-  } catch (error) {
+  } catch {
     response.status(500).json({ message: 'Failed to preview document' })
   }
 }
@@ -152,7 +202,7 @@ export async function deleteDocumentHandler(request: Request, response: Response
   try {
     await deleteDocument(id, userId as string)
     response.status(200).json({ message: 'Document deleted' })
-  } catch (error) {
+  } catch {
     response.status(500).json({ message: 'Failed to delete document' })
   }
 }
@@ -168,7 +218,7 @@ export async function deleteAllDocumentsHandler(request: Request, response: Resp
   try {
     await deleteAllUserDocuments(userId as string)
     response.status(200).json({ message: 'All documents deleted' })
-  } catch (error) {
+  } catch {
     response.status(500).json({ message: 'Failed to delete all documents' })
   }
 }

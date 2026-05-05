@@ -31,8 +31,8 @@ function levelColor(level: string) {
 export default function LogsPage() {
   return (
     <Stack spacing={3}>
-      <PageSection title="System Logs" subtitle="Observe provider, parser, and orchestration runtime events">
-        <Paper className="session-history-shell" variant="outlined">
+      <PageSection title="System Logs">
+        <Paper className="session-history-shell admin-table-shell" variant="outlined">
           <List disablePadding>
             {logs.map((log) => (
               <ListItem key={log.id} divider>

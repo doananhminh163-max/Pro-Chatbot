@@ -41,8 +41,6 @@ Hiện trong code có sự pha trộn giữa tiếng Anh và tiếng Việt:
 ### Admin Console
 
 - Users
-- Skills
-- MCPs
 - Agents
 - Providers
 - CLI Config
@@ -117,7 +115,9 @@ Hành vi đã có:
 
 Điểm cần lưu ý:
 
-- `memoryMode` có trong backend schema API nhưng chưa có control tương ứng trong UI.
+- panel cấu hình có switch `Enable global memory` để bật/tắt memory ngay trong phiên chat.
+- lựa chọn `memoryEnabled` được gửi trực tiếp trong payload `POST /api/chat/messages`.
+- composer hiển thị bộ đếm `2000` ký tự và bộ đếm `50` user messages/session; khi chạm ngưỡng thì nút gửi bị khóa và hiển thị cảnh báo.
 - frontend có fallback options cho provider/model, nhưng seed mặc định chỉ có Gemini.
 - streaming hiện là trạng thái mô phỏng giao diện, chưa phải streaming token thật từ server.
 
@@ -181,9 +181,11 @@ Avatar hiện được đọc bằng `FileReader` ở frontend và gửi lên ba
 
 Trạng thái hiện tại:
 
-- là màn hình trình bày khái niệm memory;
-- dữ liệu hiển thị là mock;
-- chưa có API lưu/đọc memory riêng.
+- đã kết nối backend thật qua các endpoint:
+  - `GET /api/chat/memory`
+  - `DELETE /api/chat/memory/global`
+- hiển thị 3 nhóm dữ liệu: session summaries, global memories, session memories gần đây.
+- hỗ trợ xóa global memory toàn cục.
 
 ### Settings
 
@@ -197,16 +199,6 @@ Trạng thái hiện tại:
 Toàn bộ các trang admin hiện dùng `AdminCrudTable` hoặc danh sách mock để mô phỏng màn quản trị tương lai.
 
 ### Users
-
-- dữ liệu mock
-- chưa có API backend
-
-### Skills
-
-- dữ liệu mock
-- chưa có API backend
-
-### MCPs
 
 - dữ liệu mock
 - chưa có API backend
@@ -256,9 +248,31 @@ Nhìn chung, giao diện chat đã được chăm chút tốt hơn phần còn l
 ### Cần phát triển tiếp
 
 - dashboard dữ liệu thật;
-- memory thực;
+- memory nâng cao (edit thủ công, pin/unpin, lọc theo loại);
 - admin CRUD thật;
 - config runtime thật;
 - log viewer thật;
 - chuẩn hóa ngôn ngữ hiển thị;
 - tối ưu các hành vi quick action.
+
+## 8. Cap nhat giao dien va toi uu chat
+
+### Chatbot
+
+- `ChatPage` da duoc tach thanh cac khoi rieng cho message stream, composer va config panel.
+- luong render message duoc co lap khoi o nhap lieu de giam rerender khi nguoi dung dang go prompt;
+- lich su hoi thoai duoc ap dung `startTransition` khi tai lai session lon;
+- markdown message duoc parse theo tung message va memo hoa o component rieng;
+- message row co `content-visibility` de giam chi phi paint voi session dai.
+
+### Admin side
+
+- `AdminLayout` va `WorkspaceLayout` da doi sang huong "operations control room";
+- sidebar co branding, telemetry block va status chip rieng cho khu admin;
+- cac trang CRUD admin duoc nang cap voi summary cards, search/filter toolbar va insight rail;
+- `Config` va `Logs` da dung chung visual language moi de tranh lech tong giao dien.
+
+### Ghi chu
+
+- du lieu admin van la mock data, thay doi nay tap trung vao shell, kha nang doc trang thai va kha nang mo rong cho CRUD that;
+- tai lieu nay can tiep tuc cap nhat khi admin duoc noi backend that cho Users, Agents, Providers, Logs va CLI policy.

@@ -92,8 +92,8 @@ SANDBOX_ROOT/
         ├── manifest.json
         ├── attachments-context.txt
         └── input/
-            ├── 01-report.pdf
-            └── 02-notes.docx
+            ├── 01-report.md
+            └── 02-notes.md
 ```
 
 ## 5. Luồng xử lý
@@ -102,7 +102,7 @@ SANDBOX_ROOT/
 2. Backend resolve session và document attachment.
 3. Backend di chuyển attachment vào session storage chuẩn nếu cần.
 4. Backend copy attachment sang sandbox job directory.
-5. Backend extract text tốt nhất có thể từ attachment và ghi `attachments-context.txt`.
+5. Backend bắt buộc extract attachment thành Markdown file trong sandbox rồi mới dựng `attachments-context.txt`.
 6. Backend ghi `manifest.json`.
 7. Backend gọi broker nội bộ với:
    - `jobId`

@@ -1,4 +1,3 @@
-import DashboardRoundedIcon from '@mui/icons-material/DashboardRounded'
 import ForumRoundedIcon from '@mui/icons-material/ForumRounded'
 import DescriptionRoundedIcon from '@mui/icons-material/DescriptionRounded'
 import PsychologyAltRoundedIcon from '@mui/icons-material/PsychologyAltRounded'
@@ -8,7 +7,6 @@ import WorkspaceLayout from './WorkspaceLayout'
 import type { NavigationItem } from '../types/navigation'
 
 const clientNavigationItems: NavigationItem[] = [
-  { label: 'Dashboard', path: '/dashboard', icon: DashboardRoundedIcon },
   {
     label: 'Chatbot',
     path: '/chat',
@@ -28,7 +26,7 @@ const clientNavigationItems: NavigationItem[] = [
 export default function ClientLayout() {
   return (
     <WorkspaceLayout
-      title="Client Workspace"
+      title="Client Workplace"
       navigationItems={clientNavigationItems}
       profileLabel="Client"
     />

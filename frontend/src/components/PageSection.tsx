@@ -5,7 +5,7 @@ interface PageSectionProps {
   title: string
   subtitle?: string
   action?: ReactNode
-  children: ReactNode
+  children?: ReactNode
 }
 
 export default function PageSection({ title, subtitle, action, children }: PageSectionProps) {
@@ -22,7 +22,7 @@ export default function PageSection({ title, subtitle, action, children }: PageS
         </Box>
         {action}
       </Stack>
-      <Box sx={{ mt: 2 }}>{children}</Box>
+      {children ? <Box sx={{ mt: 2 }}>{children}</Box> : null}
     </Paper>
   )
 }

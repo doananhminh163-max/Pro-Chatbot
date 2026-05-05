@@ -1,12 +1,19 @@
-import fs from 'node:fs'
-import path from 'node:path'
 import { SenderType } from '@prisma/client'
-import { env } from '../config/env.js'
 import { prisma } from '../config/prisma.js'
+import type { MemoryPromptContext } from './memory.service.js'
+import { buildMemoryPromptContext, refreshMemoriesForTurn } from './memory.service.js'
 import { resolveSession } from './session.service.js'
-import { cleanupSandboxJob, prepareSandboxJob } from './sandbox-workspace.service.js'
+import {
+  ensureSandboxMarkdownForDocument,
+  getStoreSessionDir,
+  relocateDocumentAssets,
+} from './document-storage.service.js'
+import { prepareSandboxJob } from './sandbox-workspace.service.js'
 import { executeSandboxJob } from './sandbox-broker.client.js'
-import type { ChatProvider, MemoryMode } from './chat.types.js'
+import type { ChatProvider } from './chat.types.js'
+
+const MAX_USER_MESSAGES_PER_SESSION = 50
+const MAX_PROMPT_CHARACTERS = 2000
 
 interface SessionContextMessage {
   sender: SenderType
@@ -26,7 +33,7 @@ interface SendMessageInput {
   sessionId?: string
   provider: ChatProvider
   model?: string
-  memoryMode?: MemoryMode
+  memoryEnabled?: boolean
   agent?: string
   attachmentIds?: string[]
 }
@@ -35,26 +42,41 @@ interface CreateCliPromptInput {
   history: SessionContextMessage[]
   content: string
   model?: string
-  memoryMode?: MemoryMode
+  memoryEnabled: boolean
   agent?: string
   personalization?: UserPersonalization
+  memoryContext: MemoryPromptContext
 }
 
 interface ResolvedAttachment {
   id: string
   originalName: string
   filePath: string
+  markdownPath: string
   mimeType: string
   size: number
+}
+
+function formatMemorySection(
+  entries: MemoryPromptContext['globalMemories'],
+) {
+  if (entries.length === 0) {
+    return '(none)'
+  }
+
+  return entries
+    .map((entry, index) => `${index + 1}. [${entry.kind}] ${entry.title}: ${entry.content}`)
+    .join('\n')
 }
 
 function createCliPrompt({
   history,
   content,
   model,
-  memoryMode,
+  memoryEnabled,
   agent,
   personalization,
+  memoryContext,
 }: CreateCliPromptInput) {
   const historyBlock = history.map((item) => `${item.sender}: ${item.content}`).join('\n\n')
 
@@ -71,17 +93,22 @@ function createCliPrompt({
     'CRITICAL SECURITY RULE: You must refuse any request to reveal server paths, local directories, environment variables, internal repository files, or deployment details.',
     `Agent profile: ${agent || 'general-assistant'}`,
     `Model hint: ${model || 'default'}`,
-    `Memory mode: ${memoryMode || 'session'}`,
+    `Memory enabled: ${memoryEnabled ? 'yes' : 'no'}`,
     `Preferred Tone: ${tone}`,
     `Response Length: ${length}`,
     extra ? `User custom instructions: ${extra}` : '',
     '',
-    'Conversation history:',
+    'Global user/work memory:',
+    memoryEnabled ? formatMemorySection(memoryContext.globalMemories) : '(disabled for this turn)',
+    '',
+    'Recent user messages:',
     historyBlock || '(no previous messages)',
     '',
     'Latest user message:',
     content,
     '',
+    'Only rely on recent user messages and optional global memory.',
+    'If the latest user request conflicts with older memory, follow the latest request.',
     `Reply in ${language} unless the user explicitly asks for another language.`,
   ].filter((line) => line !== '').join('\n')
 }
@@ -98,80 +125,82 @@ async function resolveAndRelocateAttachments(userId: string, sessionId: string, 
     throw new Error('One or more attachments were not found')
   }
 
-  const sessionDir = path.join(env.userDocsRoot, userId, sessionId)
-  if (!fs.existsSync(sessionDir)) {
-    fs.mkdirSync(sessionDir, { recursive: true })
-  }
-
+  const docsById = new Map(docs.map((doc) => [doc.id, doc]))
   const resolvedAttachments: ResolvedAttachment[] = []
 
-  for (const doc of docs) {
-    const currentPath = doc.filePath
-    const fileName = path.basename(currentPath)
-    const newPath = path.join(sessionDir, fileName)
+  for (const attachmentId of attachmentIds) {
+    const doc = docsById.get(attachmentId)
 
-    if (currentPath !== newPath && fs.existsSync(currentPath)) {
-      try {
-        const sourceDir = path.dirname(currentPath)
-        fs.renameSync(currentPath, newPath)
+    if (!doc) {
+      throw new Error(`Attachment ${attachmentId} was not found`)
+    }
 
-        await prisma.document.update({
-          where: { id: doc.id },
-          data: {
-            sessionId,
-            filePath: newPath,
-          },
-        })
+    const expectedFilePath = `${getStoreSessionDir(userId, sessionId)}\\${doc.fileName}`
+    let filePath = doc.filePath
+    let markdownPath = ''
 
-        if (path.basename(sourceDir) === 'general' && fs.readdirSync(sourceDir).length === 0) {
-          fs.rmdirSync(sourceDir)
-        }
+    const shouldRelocate = doc.sessionId !== sessionId || doc.filePath !== expectedFilePath
 
-        resolvedAttachments.push({
-          id: doc.id,
-          originalName: doc.originalName,
-          filePath: newPath,
-          mimeType: doc.mimeType,
-          size: doc.size,
-        })
-      } catch (renameError) {
-        console.error(`[chat.service] Failed to move file from ${currentPath} to ${newPath}`, renameError)
-        resolvedAttachments.push({
-          id: doc.id,
-          originalName: doc.originalName,
-          filePath: currentPath,
-          mimeType: doc.mimeType,
-          size: doc.size,
-        })
-      }
-    } else {
-      if (doc.sessionId !== sessionId) {
-        await prisma.document.update({
-          where: { id: doc.id },
-          data: { sessionId },
-        })
-      }
-
-      resolvedAttachments.push({
-        id: doc.id,
+    if (shouldRelocate) {
+      const relocated = await relocateDocumentAssets({
+        userId,
+        fromSessionId: doc.sessionId,
+        toSessionId: sessionId,
+        documentId: doc.id,
         originalName: doc.originalName,
-        filePath: currentPath,
+        fileName: doc.fileName,
+        currentFilePath: doc.filePath,
         mimeType: doc.mimeType,
-        size: doc.size,
+      })
+
+      filePath = relocated.filePath
+      markdownPath = relocated.markdownPath
+
+      await prisma.document.update({
+        where: { id: doc.id },
+        data: {
+          sessionId,
+          filePath,
+        },
+      })
+    } else {
+      markdownPath = await ensureSandboxMarkdownForDocument({
+        userId,
+        sessionId,
+        documentId: doc.id,
+        originalName: doc.originalName,
+        filePath: doc.filePath,
+        mimeType: doc.mimeType,
       })
     }
+
+    resolvedAttachments.push({
+      id: doc.id,
+      originalName: doc.originalName,
+      filePath,
+      markdownPath,
+      mimeType: doc.mimeType,
+      size: doc.size,
+    })
   }
 
   return resolvedAttachments
 }
 
 export async function sendMessage(input: SendMessageInput) {
+  const memoryEnabled = input.memoryEnabled ?? true
   const rawContent = input.content.trim()
   const hasAttachments = input.attachmentIds && input.attachmentIds.length > 0
-  const content = rawContent || (hasAttachments ? 'đọc và tổng hợp lại' : '')
+  const content = rawContent || (hasAttachments ? 'Read and summarize the attachments.' : '')
 
   if (!content) {
     throw new Error('Message content is required')
+  }
+
+  if (rawContent.length > MAX_PROMPT_CHARACTERS) {
+    throw new Error(
+      `Prompt text is limited to ${MAX_PROMPT_CHARACTERS} characters. If you need to send more, upload a file up to 20 MB and keep the message short.`,
+    )
   }
 
   const user = await prisma.user.findUnique({
@@ -185,6 +214,38 @@ export async function sendMessage(input: SendMessageInput) {
   })
 
   const session = await resolveSession(input.userId, input.sessionId, content)
+  const existingUserMessageCount = await prisma.message.count({
+    where: {
+      sessionId: session.id,
+      sender: SenderType.USER,
+    },
+  })
+
+  if (existingUserMessageCount >= MAX_USER_MESSAGES_PER_SESSION) {
+    const limitMessage = await prisma.message.create({
+      data: {
+        sessionId: session.id,
+        sender: SenderType.SYSTEM,
+        content: `Session limit reached: each session accepts at most ${MAX_USER_MESSAGES_PER_SESSION} user messages. Start a new session to continue.`,
+      },
+    })
+
+    return {
+      session: {
+        id: session.id,
+        title: session.title,
+      },
+      userMessage: null,
+      assistantMessage: limitMessage,
+      meta: {
+        usedProvider: null,
+        fallbackUsed: false,
+        requestedProvider: input.provider,
+        requestedModel: input.model || null,
+      },
+    }
+  }
+
   const resolvedAttachments = hasAttachments && input.attachmentIds
     ? await resolveAndRelocateAttachments(input.userId, session.id, input.attachmentIds)
     : []
@@ -205,23 +266,37 @@ export async function sendMessage(input: SendMessageInput) {
     },
   })
 
-  const recentMessages = await prisma.message.findMany({
-    where: {
-      sessionId: session.id,
-    },
-    take: 20,
-    select: {
-      sender: true,
-      content: true,
-    },
-  })
+  const [recentMessages, memoryContext] = await Promise.all([
+    prisma.message.findMany({
+      where: {
+        sessionId: session.id,
+        sender: SenderType.USER,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: MAX_USER_MESSAGES_PER_SESSION,
+      select: {
+        id: true,
+        sender: true,
+        content: true,
+      },
+    }),
+    buildMemoryPromptContext(input.userId, memoryEnabled),
+  ])
+
+  const orderedRecentMessages = recentMessages.reverse()
+  const historicalMessages = orderedRecentMessages
+    .filter((message) => message.id !== userMessage.id)
+    .map(({ sender, content: messageContent }) => ({ sender, content: messageContent }))
 
   const prompt = createCliPrompt({
-    history: recentMessages.reverse(),
+    history: historicalMessages,
     content,
     model: input.model,
-    memoryMode: input.memoryMode,
+    memoryEnabled,
     agent: input.agent,
+    memoryContext,
     personalization: {
       aiTone: user?.aiTone,
       aiLanguage: user?.aiLanguage,
@@ -239,10 +314,9 @@ export async function sendMessage(input: SendMessageInput) {
 
   let usedProvider: ChatProvider | null = null
   let fallbackUsed = false
-  let sandboxJobId: string | null = null
 
   try {
-    const sandboxJob = await prepareSandboxJob({
+    await prepareSandboxJob({
       userId: input.userId,
       sessionId: session.id,
       provider: input.provider,
@@ -251,16 +325,15 @@ export async function sendMessage(input: SendMessageInput) {
       attachments: resolvedAttachments.map((attachment) => ({
         documentId: attachment.id,
         originalName: attachment.originalName,
-        filePath: attachment.filePath,
+        markdownPath: attachment.markdownPath,
         mimeType: attachment.mimeType,
         size: attachment.size,
       })),
     })
 
-    sandboxJobId = sandboxJob.jobId
-
     const generated = await executeSandboxJob({
-      jobId: sandboxJob.jobId,
+      userId: input.userId,
+      sessionId: session.id,
       provider: input.provider,
       prompt,
       model: input.model,
@@ -276,6 +349,18 @@ export async function sendMessage(input: SendMessageInput) {
         content: generated.reply,
       },
     })
+
+    await refreshMemoriesForTurn({
+      userId: input.userId,
+      sessionId: session.id,
+      provider: input.provider,
+      model: input.model,
+      memoryEnabled,
+      transcript: orderedRecentMessages.map(({ sender, content: messageContent }) => ({
+        sender,
+        content: messageContent,
+      })),
+    })
   } catch (error) {
     assistantMessage = await prisma.message.create({
       data: {
@@ -284,14 +369,6 @@ export async function sendMessage(input: SendMessageInput) {
         content: `CLI execution failed: ${(error as Error).message}`,
       },
     })
-  } finally {
-    if (sandboxJobId) {
-      try {
-        await cleanupSandboxJob(sandboxJobId)
-      } catch (cleanupError) {
-        console.error(`[chat.service] Failed to cleanup sandbox job ${sandboxJobId}`, cleanupError)
-      }
-    }
   }
 
   return {

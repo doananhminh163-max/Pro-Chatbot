@@ -37,6 +37,10 @@ interface SessionDetailResponse {
   session: ChatSessionDetail
 }
 
+interface MemoryOverviewResponse {
+  overview: MemoryOverview
+}
+
 export interface SendMessageMeta {
   usedProvider: ChatProvider | null
   fallbackUsed: boolean
@@ -49,7 +53,7 @@ export interface SendMessageResponse {
     id: string
     title: string
   }
-  userMessage: ChatMessage
+  userMessage: ChatMessage | null
   assistantMessage: ChatMessage
   meta: SendMessageMeta
 }
@@ -59,8 +63,25 @@ interface SendMessageInput {
   content: string
   provider: ChatProvider
   model?: string
+  memoryEnabled?: boolean
   agent?: string
   attachments?: string[]
+}
+
+export interface MemoryEntry {
+  id: string
+  scope: 'GLOBAL'
+  kind: 'PROFILE' | 'PREFERENCE' | 'TASK' | 'DOMAIN' | 'FACT'
+  title: string
+  content: string
+  importance: number
+  sessionId: string | null
+  sessionTitle: string | null
+  lastUsedAt: string
+}
+
+export interface MemoryOverview {
+  globalMemories: MemoryEntry[]
 }
 
 export interface ChatConfig {
@@ -92,6 +113,11 @@ export async function fetchChatSession(sessionId: string) {
   return response.data.session
 }
 
+export async function fetchMemoryOverview() {
+  const response = await http.get<MemoryOverviewResponse>(chatEndpoints.memory)
+  return response.data.overview
+}
+
 export async function updateSession(sessionId: string, title: string) {
   const response = await http.patch(chatEndpoints.updateSession(sessionId), { title })
   return response.data
@@ -104,6 +130,11 @@ export async function deleteSession(sessionId: string) {
 
 export async function deleteAllSessions() {
   const response = await http.delete(chatEndpoints.sessions)
+  return response.data
+}
+
+export async function clearGlobalMemory() {
+  const response = await http.delete(chatEndpoints.clearGlobalMemory)
   return response.data
 }
 

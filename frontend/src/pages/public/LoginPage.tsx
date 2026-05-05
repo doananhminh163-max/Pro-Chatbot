@@ -19,7 +19,7 @@ import VisibilityOffOutlinedIcon from '@mui/icons-material/VisibilityOffOutlined
 import GoogleIcon from '@mui/icons-material/Google'
 import { Link as RouterLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
-import { getGoogleOAuthUrl } from '../../services/auth'
+import { getDefaultRouteForRole, getGoogleOAuthUrl } from '../../services/auth'
 
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -55,8 +55,8 @@ export default function LoginPage() {
     try {
       setIsSubmitting(true)
       setError('')
-      await signIn({ emailOrUsername, password })
-      navigate('/dashboard')
+      const profile = await signIn({ emailOrUsername, password })
+      navigate(getDefaultRouteForRole(profile.role), { replace: true })
     } catch (requestError) {
       if (isAxiosError<{ message?: string }>(requestError)) {
         setError(requestError.response?.data?.message ?? 'Sign in failed. Please check credentials.')
@@ -117,14 +117,14 @@ export default function LoginPage() {
             />
 
             <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
-              <FormControlLabel 
-                control={<Checkbox size="small" />} 
-                label={<Typography variant="body2" sx={{ fontSize: '0.85rem' }}>Remember me</Typography>} 
+              <FormControlLabel
+                control={<Checkbox size="small" />}
+                label={<Typography variant="body2" sx={{ fontSize: '0.85rem' }}>Remember me</Typography>}
               />
-              <Link 
+              <Link
                 component={RouterLink}
                 to="/forgot-password"
-                underline="hover" 
+                underline="hover"
                 color="primary"
                 sx={{ fontSize: '0.85rem' }}
               >

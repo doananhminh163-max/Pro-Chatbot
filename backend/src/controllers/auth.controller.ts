@@ -200,14 +200,14 @@ export function googleSuccessHandler(request: Request, response: Response) {
   const user = request.user as AuthUserPayload | undefined
 
   if (!user) {
-    response.status(401).json({ message: 'Google authentication failed' })
+    response.redirect(302, `${env.frontendUrl}/oauth/callback?error=missing-user`)
     return
   }
 
   issueSessionCookie(response, user)
-  response.redirect(302, `${env.frontendUrl}/dashboard`)
+  response.redirect(302, `${env.frontendUrl}/oauth/callback`)
 }
 
 export function googleFailureHandler(_request: Request, response: Response) {
-  response.redirect(302, `${env.frontendUrl}/login?oauth=failed`)
+  response.redirect(302, `${env.frontendUrl}/oauth/callback?error=failed`)
 }

@@ -22,14 +22,14 @@ Hệ thống này được xây để:
 - Upload, preview, download, xóa tài liệu.
 - Tạo phiên chat, gửi tin nhắn, xem lịch sử, đổi tên phiên, xóa phiên.
 - Lấy danh sách provider/model/agent từ database để đổ vào cấu hình chat.
+- Memory engine chỉ dùng `global memory`, có thể bật/tắt ngay trong màn chat + Memory page để xem/xóa dữ liệu memory toàn cục.
 
 ### Mới ở mức scaffold hoặc dữ liệu mẫu
 
 - Dashboard client đang hiển thị số liệu mock.
-- Memory page là giao diện demo, chưa có backend riêng.
 - Settings page mới điều khiển theme ở frontend; các tùy chọn khác chưa lưu thật.
 - Toàn bộ Admin Console hiện là giao diện quản trị mẫu, chưa gọi API CRUD thật.
-- Trường `Document.extractedText` đã có trong schema nhưng chưa có pipeline parse/OCR thực tế.
+- `Document.extractedText` hiện được populate bằng Markdown extract thật từ `xlsx/csv/pdf/docx/image/text` trước khi file được đưa vào sandbox.
 - Logic fallback provider chưa được hiện thực dù UI và metadata đã chừa chỗ.
 
 ## 3. Kiến trúc công nghệ
@@ -94,7 +94,8 @@ Frontend mặc định chạy tại `http://localhost:5173`, backend tại `http
 
 1. Frontend gửi `multipart/form-data` tới `/api/documents/upload`.
 2. Backend lưu tệp vật lý vào `USER_DOCS_ROOT/<userId>` hoặc `USER_DOCS_ROOT/<userId>/<sessionId>`.
-3. Backend ghi metadata vào bảng `Document`.
+3. Backend extract nội dung sang Markdown (`xlsx`, `csv`, `pdf`, `docx`, `image`, `text`) và lưu vào `Document.extractedText`.
+4. Backend ghi metadata vào bảng `Document`.
 
 ### Gửi tin nhắn chat
 
@@ -102,10 +103,13 @@ Frontend mặc định chạy tại `http://localhost:5173`, backend tại `http
 2. Backend tạo hoặc tìm `ChatSession`.
 3. Nếu file đang ở thư mục gốc người dùng, backend sẽ di chuyển vật lý vào thư mục của session.
 4. Backend tạo `Message` của người dùng và gắn `Document` vào message đó.
-5. Backend dựng prompt từ lịch sử 20 tin nhắn gần nhất + personalization.
-6. Backend copy attachment sang `SANDBOX_ROOT/jobs/<jobId>` và tạo `attachments-context.txt`.
-7. Backend gọi sandbox broker nội bộ, broker chỉ làm việc trong workspace tạm đó.
-8. Backend nhận kết quả và lưu phản hồi thành `Message` của AI hoặc `SYSTEM`.
+5. Mỗi prompt text bị giới hạn `<= 2000` ký tự; nếu dài hơn thì người dùng phải gửi file `<= 20MB`.
+6. Mỗi session chỉ nhận tối đa `50` tin nhắn từ phía người dùng; vượt ngưỡng thì backend lưu `SYSTEM` message yêu cầu mở session mới.
+7. Backend nạp `global memory` nếu người dùng bật Memory cho lượt chat đó.
+8. Backend dựng prompt từ tối đa 50 tin nhắn gần nhất của người dùng + personalization + global memory.
+9. Backend tạo file Markdown cho từng attachment trong `SANDBOX_ROOT/jobs/<jobId>/input` và tạo `attachments-context.txt` từ chính các file `.md` đó.
+10. Backend gọi sandbox broker nội bộ, broker chỉ làm việc với các Markdown artifact trong workspace tạm đó.
+11. Backend nhận kết quả, lưu phản hồi thành `Message`, rồi chạy bước memory extraction để cập nhật `global memory`.
 
 ### Xóa session
 

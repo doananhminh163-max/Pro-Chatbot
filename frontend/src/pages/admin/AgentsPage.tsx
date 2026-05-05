@@ -4,7 +4,6 @@ const columns = [
   { key: 'name', label: 'Name' },
   { key: 'description', label: 'Description' },
   { key: 'version', label: 'Version' },
-  { key: 'status', label: 'Status' },
 ]
 
 const rows = [
@@ -35,7 +34,6 @@ export default function AgentsPage() {
   return (
     <AdminCrudTable
       title="Agents Config"
-      subtitle="Configure specialized assistants and bind Skills/MCP capabilities"
       columns={columns}
       rows={rows}
       addLabel="Add Agent"

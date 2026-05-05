@@ -35,7 +35,7 @@ export default function ProfileLayout() {
   const displayName = user?.fullName || user?.username || 'User Profile'
 
   const handleBackToWorkspace = () => {
-    navigate('/dashboard')
+    navigate('/chat')
   }
 
   const handleSignOut = async () => {

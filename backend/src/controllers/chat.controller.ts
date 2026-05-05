@@ -10,16 +10,18 @@ import {
   deleteSession,
   deleteAllSessions,
 } from '../services/session.service.js'
+import {
+  clearGlobalMemories,
+  getMemoryOverview,
+} from '../services/memory.service.js'
 import { getChatConfig } from '../services/config.service.js'
-
-const providerSchema = z.literal('gemini')
 
 const sendMessageSchema = z.object({
   sessionId: z.string().min(1).optional(),
   content: z.string().optional(),
   provider: z.enum(['gemini', 'opencode']).default('gemini'),
   model: z.string().min(1).optional(),
-  memoryMode: z.enum(['session', 'global', 'hybrid']).optional(),
+  memoryEnabled: z.boolean().optional(),
   agent: z.string().min(1).optional(),
   attachments: z.array(z.string()).optional(),
 })
@@ -79,6 +81,18 @@ export async function getSessionMessagesHandler(request: Request, response: Resp
   }
 }
 
+export async function getMemoryOverviewHandler(request: Request, response: Response) {
+  const userId = getUserId(request)
+
+  if (!userId) {
+    response.status(401).json({ message: 'Unauthorized' })
+    return
+  }
+
+  const overview = await getMemoryOverview(userId)
+  response.status(200).json({ overview })
+}
+
 export async function sendMessageHandler(request: Request, response: Response) {
   const userId = getUserId(request)
 
@@ -96,7 +110,7 @@ export async function sendMessageHandler(request: Request, response: Response) {
       content: payload.content || '',
       provider: payload.provider,
       model: payload.model,
-      memoryMode: payload.memoryMode,
+      memoryEnabled: payload.memoryEnabled,
       agent: payload.agent,
       attachmentIds: payload.attachments,
     })
@@ -109,7 +123,7 @@ export async function sendMessageHandler(request: Request, response: Response) {
         sessionId: request.body?.sessionId,
         provider: request.body?.provider,
         model: request.body?.model,
-        memoryMode: request.body?.memoryMode,
+        memoryEnabled: request.body?.memoryEnabled,
         agent: request.body?.agent,
         contentLength: typeof request.body?.content === 'string' ? request.body.content.length : 0,
         errors: error.flatten(),
@@ -126,7 +140,7 @@ export async function sendMessageHandler(request: Request, response: Response) {
       sessionId: request.body?.sessionId,
       provider: request.body?.provider,
       model: request.body?.model,
-      memoryMode: request.body?.memoryMode,
+      memoryEnabled: request.body?.memoryEnabled,
       agent: request.body?.agent,
       contentLength: typeof request.body?.content === 'string' ? request.body.content.length : 0,
       error: errorMessage,
@@ -186,4 +200,16 @@ export async function deleteAllSessionsHandler(request: Request, response: Respo
   } catch (error) {
     response.status(400).json({ message: (error as Error).message || 'Unable to delete all sessions' })
   }
+}
+
+export async function clearGlobalMemoriesHandler(request: Request, response: Response) {
+  const userId = getUserId(request)
+
+  if (!userId) {
+    response.status(401).json({ message: 'Unauthorized' })
+    return
+  }
+
+  await clearGlobalMemories(userId)
+  response.status(200).json({ message: 'Global memory cleared successfully' })
 }

@@ -186,7 +186,7 @@ export default function SessionsPage() {
                     primary={session.title} 
                     secondary={session.lastMessage ? `Last: ${session.lastMessage.content.slice(0, 100)}${session.lastMessage.content.length > 100 ? '...' : ''}` : 'No messages'}
                   />
-                  <Stack direction="row" spacing={1} alignItems="center" sx={{ position: 'absolute', right: 16 }}>
+                  <Stack direction="row" spacing={1} sx={{ position: 'absolute', right: 16, alignItems: 'center' }}>
                     <Chip label={`${session.messageCount} msgs`} size="small" variant="outlined" />
                     <IconButton size="small" onClick={(e) => handleMenuOpen(e, session)}>
                       <MoreVertIcon fontSize="small" />

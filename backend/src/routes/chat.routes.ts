@@ -1,6 +1,8 @@
 import { Router } from 'express'
 import {
+  clearGlobalMemoriesHandler,
   getConfigHandler,
+  getMemoryOverviewHandler,
   getSessionMessagesHandler,
   listSessionsHandler,
   sendMessageHandler,
@@ -14,6 +16,8 @@ const chatRouter = Router()
 
 chatRouter.use(requireAuth)
 chatRouter.get('/config', getConfigHandler)
+chatRouter.get('/memory', getMemoryOverviewHandler)
+chatRouter.delete('/memory/global', clearGlobalMemoriesHandler)
 chatRouter.get('/sessions', listSessionsHandler)
 chatRouter.delete('/sessions', deleteAllSessionsHandler)
 chatRouter.get('/sessions/:sessionId/messages', getSessionMessagesHandler)

@@ -35,7 +35,7 @@ interface AuthContextValue {
   }) => Promise<AuthUser>
   forgotPasswordFlow: (payload: { emailOrUsername: string }) => ReturnType<typeof forgotPassword>
   resetPasswordFlow: (payload: { token: string; newPassword: string }) => ReturnType<typeof resetPassword>
-  refreshSession: () => Promise<void>
+  refreshSession: () => Promise<AuthUser | null>
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null)
@@ -52,8 +52,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       const profile = await fetchCurrentUser()
       setUser(profile)
+      return profile
     } catch {
       setUser(null)
+      return null
     } finally {
       setLoading(false)
     }

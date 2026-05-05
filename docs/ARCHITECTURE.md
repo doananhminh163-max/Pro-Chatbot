@@ -163,10 +163,11 @@ Không cho broker làm việc trực tiếp trong `USER_DOCS_ROOT`.
 
 `chat.service.ts` lấy:
 
-- tối đa 20 message gần nhất của session;
+- tối đa 50 message gần nhất từ phía người dùng trong session;
 - nội dung người dùng vừa gửi;
 - personalization của user;
-- model, memory mode và agent do frontend chọn.
+- model, trạng thái bật/tắt memory và agent do frontend chọn;
+- memory context từ `memory.service.ts` (chỉ global memory khi người dùng bật Memory).
 
 Sau đó backend tạo prompt text thuần với cấu trúc:
 
@@ -176,14 +177,29 @@ Sau đó backend tạo prompt text thuần với cấu trúc:
 - memory mode;
 - tone/language/response length;
 - custom instructions;
-- conversation history;
+- global user/work memory;
+- user-message history;
 - latest user message.
+
+### Cơ chế memory lifecycle
+
+1. Trước khi gửi prompt chính, backend gọi `buildMemoryPromptContext(userId, memoryEnabled)`.
+2. Nếu `memoryEnabled = true`, backend nạp `MemoryEntry` scope `GLOBAL`; nếu không thì prompt đi tiếp mà không có memory.
+3. Prompt chính chỉ chứa:
+   - personalization settings;
+   - tối đa 50 tin nhắn gần nhất của người dùng;
+   - global user/work memory nếu đang bật.
+4. Prompt text của user bị giới hạn `<= 2000` ký tự; nội dung dài hơn phải chuyển thành file `<= 20MB`.
+5. Mỗi session chỉ cho phép tối đa 50 tin nhắn `USER`; vượt ngưỡng thì backend tạo `SYSTEM` message và không gọi AI.
+6. Sau khi có phản hồi AI, backend gọi `refreshMemoriesForTurn(...)` để chạy prompt extraction riêng và cập nhật `MemoryEntry` scope `GLOBAL`.
+7. Upsert memory dựa trên `title` (cùng user/scope), đồng thời cập nhật `lastUsedAt`.
+8. Hệ thống tự cắt dữ liệu memory theo ngưỡng: global scope giữ tối đa 12 bản ghi quan trọng nhất.
 
 ### Cách backend gọi CLI
 
 1. Backend chuẩn bị `job workspace` trong `SANDBOX_ROOT/jobs/<jobId>`.
-2. Backend copy attachment được phép vào workspace đó.
-3. Backend extract text và ghi `attachments-context.txt`.
+2. Backend tạo file Markdown cho từng attachment được phép trong workspace đó.
+3. Backend dựng `attachments-context.txt` từ chính các file Markdown đã extract.
 4. Broker đọc command template từ `.env`.
 5. Broker thay placeholder `{model}` hoặc `{{model}}` hoặc `$MODEL`.
 6. Broker chạy CLI trực tiếp với `shell: false`.
@@ -205,8 +221,8 @@ Khi người dùng gửi tin nhắn có `attachmentIds`:
 4. Nếu file đang nằm ngoài thư mục session, backend `renameSync` sang thư mục của session.
 5. Cập nhật `sessionId` và `filePath` trong database.
 6. Tạo `Message` của user và `connect` các `Document` vào message đó.
-7. Copy attachment sang `SANDBOX_ROOT/jobs/<jobId>/input`.
-8. Broker chỉ xử lý bản copy sandbox, không xử lý trực tiếp file nằm trong session storage.
+7. Ghi từng attachment thành file `.md` trong `SANDBOX_ROOT/jobs/<jobId>/input`.
+8. Broker chỉ xử lý các Markdown artifact trong sandbox, không xử lý trực tiếp file nhị phân nằm trong session storage.
 
 Kết quả là storage vật lý và storage logic luôn đi cùng nhau.
 
@@ -241,7 +257,7 @@ Backend phụ thuộc nặng vào `.env`. Những nhóm biến chính:
 ## 9. Những gì kiến trúc chưa có
 
 - Chưa có queue/background job cho xử lý file nặng.
-- Chưa có parser/OCR pipeline riêng.
+- Đã có parser/OCR pipeline riêng cho `xlsx/csv/pdf/docx/image/text` trước khi CLI đọc attachment.
 - Chưa có logging tập trung hoặc audit trail thực.
 - Chưa có API admin chuyên biệt.
 - Chưa có storage cloud; mọi thứ đang lưu local.

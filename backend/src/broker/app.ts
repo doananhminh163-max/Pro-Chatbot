@@ -6,11 +6,12 @@ import { z } from 'zod'
 import { env } from '../config/env.js'
 import { ensureStorageDirectories, validateStorageConfiguration } from '../config/storage.js'
 import { resolveCliCommand } from '../services/cli-command.service.js'
-import { getSandboxJobDir, pruneExpiredSandboxJobs } from '../services/sandbox-workspace.service.js'
+import { getSandboxWorkspaceDir, pruneExpiredSandboxJobs } from '../services/sandbox-workspace.service.js'
 import type { ChatProvider } from '../services/chat.types.js'
 
 const executeSchema = z.object({
-  jobId: z.string().min(1),
+  userId: z.string().min(1),
+  sessionId: z.string().min(1),
   provider: z.enum(['gemini', 'opencode']),
   prompt: z.string().min(1),
   model: z.string().min(1).optional(),
@@ -74,12 +75,13 @@ function sanitizeChildEnv() {
 async function executeSandboxCli(
   provider: ChatProvider,
   prompt: string,
-  jobId: string,
+  userId: string,
+  sessionId: string,
   model?: string,
 ) {
   const command = resolveCliCommand(provider, prompt, model)
-  const jobDir = getSandboxJobDir(jobId)
-  const contextFile = path.join(jobDir, 'attachments-context.txt')
+  const workspaceDir = getSandboxWorkspaceDir(userId, sessionId)
+  const contextFile = path.join(workspaceDir, 'attachments-context.txt')
 
   let stdinPayload = ''
 
@@ -93,7 +95,7 @@ async function executeSandboxCli(
     const processHandle = spawn(command.executable, command.args, {
       shell: false,
       windowsHide: true,
-      cwd: jobDir,
+      cwd: workspaceDir,
       env: sanitizeChildEnv(),
       stdio: ['pipe', 'pipe', 'pipe'],
     })
@@ -175,10 +177,16 @@ app.post('/internal/jobs/execute', requireInternalAuth, async (request, response
     await pruneExpiredSandboxJobs()
 
     const payload = executeSchema.parse(request.body)
-    const jobDir = getSandboxJobDir(payload.jobId)
-    await fs.access(jobDir)
+    const workspaceDir = getSandboxWorkspaceDir(payload.userId, payload.sessionId)
+    await fs.access(workspaceDir)
 
-    const reply = await executeSandboxCli(payload.provider, payload.prompt, payload.jobId, payload.model)
+    const reply = await executeSandboxCli(
+      payload.provider,
+      payload.prompt,
+      payload.userId,
+      payload.sessionId,
+      payload.model,
+    )
 
     response.status(200).json({
       reply,

@@ -15,6 +15,7 @@ import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined'
 import VisibilityOffOutlinedIcon from '@mui/icons-material/VisibilityOffOutlined'
 import { Link as RouterLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
+import { getDefaultRouteForRole } from '../../services/auth'
 
 
 export default function RegisterPage() {
@@ -46,12 +47,12 @@ export default function RegisterPage() {
     try {
       setIsSubmitting(true)
       setError('')
-      await signUp({
+      const profile = await signUp({
         username,
         email,
         password,
       })
-      navigate('/dashboard')
+      navigate(getDefaultRouteForRole(profile.role), { replace: true })
     } catch (requestError) {
       if (isAxiosError<{ message?: string }>(requestError)) {
         setError(requestError.response?.data?.message ?? 'Register failed. Please try again.')

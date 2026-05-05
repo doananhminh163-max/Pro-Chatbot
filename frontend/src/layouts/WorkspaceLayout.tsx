@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import {
+  Button,
   Box,
   Chip,
   Collapse,
@@ -15,43 +16,51 @@ import {
   TextField,
   Tooltip,
   Typography,
-  useTheme,
   useMediaQuery,
+  useTheme,
 } from '@mui/material'
-import MenuIcon from '@mui/icons-material/Menu'
 import CloseIcon from '@mui/icons-material/Close'
-import NotificationsNoneRoundedIcon from '@mui/icons-material/NotificationsNoneRounded'
 import DarkModeOutlinedIcon from '@mui/icons-material/DarkModeOutlined'
+import ExpandLessRoundedIcon from '@mui/icons-material/ExpandLessRounded'
+import ExpandMoreRoundedIcon from '@mui/icons-material/ExpandMoreRounded'
 import LightModeOutlinedIcon from '@mui/icons-material/LightModeOutlined'
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded'
+import MenuIcon from '@mui/icons-material/Menu'
+import NotificationsNoneRoundedIcon from '@mui/icons-material/NotificationsNoneRounded'
+import SwapHorizRoundedIcon from '@mui/icons-material/SwapHorizRounded'
 import PersonOutlineRoundedIcon from '@mui/icons-material/PersonOutlineRounded'
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded'
-import ExpandMoreRoundedIcon from '@mui/icons-material/ExpandMoreRounded'
-import ExpandLessRoundedIcon from '@mui/icons-material/ExpandLessRounded'
+import SecurityRoundedIcon from '@mui/icons-material/SecurityRounded'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import type { NavigationItem } from '../types/navigation'
-import { useAuth } from '../hooks/useAuth'
 import { useAppTheme } from '../contexts/ThemeContext'
+import { useAuth } from '../hooks/useAuth'
+import type { NavigationItem } from '../types/navigation'
 
 interface WorkspaceLayoutProps {
   title: string
   subtitle?: string
   navigationItems: NavigationItem[]
   profileLabel: string
+  eyebrow?: string
+  searchPlaceholder?: string
+  shellVariant?: 'client' | 'admin'
+  statusTag?: string
 }
 
 const SIDEBAR_WIDTH = 264
 
 function SidebarContent({
-  navigationItems,
   closeDrawer,
+  navigationItems,
   onOpenProfile,
   onSignOut,
+  shellVariant,
 }: {
-  navigationItems: NavigationItem[]
   closeDrawer: () => void
+  navigationItems: NavigationItem[]
   onOpenProfile: () => void
   onSignOut: () => void
+  shellVariant: 'client' | 'admin'
 }) {
   const location = useLocation()
   const navigate = useNavigate()
@@ -94,15 +103,34 @@ function SidebarContent({
     closeDrawer()
   }
 
+  const branding = shellVariant === 'admin'
+    ? {
+        title: 'Pro Chatbot',
+        subtitle: undefined,
+        label: undefined,
+      }
+    : {
+        title: 'Pro Chatbot',
+        subtitle: undefined,
+        label: undefined,
+      }
+
   return (
-    <Box className="app-sidebar-content">
-      <Stack className="app-branding" spacing={0.5}>
+    <Box className={`app-sidebar-content app-sidebar-content-${shellVariant}`}>
+      <Stack className="app-branding" spacing={0.75}>
+        {branding.label ? (
+          <Typography variant="caption" className="app-branding__eyebrow">
+            {branding.label}
+          </Typography>
+        ) : null}
         <Typography variant="h6" className="app-brand-title">
-          Pro Chatbot
+          {branding.title}
         </Typography>
-        <Typography variant="body2" color="text.secondary">
-          Control Room Edition
-        </Typography>
+        {branding.subtitle ? (
+          <Typography variant="body2" color="text.secondary">
+            {branding.subtitle}
+          </Typography>
+        ) : null}
       </Stack>
 
       <List disablePadding className="app-nav-list">
@@ -188,6 +216,10 @@ export default function WorkspaceLayout({
   subtitle,
   navigationItems,
   profileLabel,
+  eyebrow,
+  searchPlaceholder = 'Search sessions, documents, agents...',
+  shellVariant = 'client',
+  statusTag,
 }: WorkspaceLayoutProps) {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
@@ -198,6 +230,7 @@ export default function WorkspaceLayout({
   const { signOut, user } = useAuth()
 
   const displayLabel = user?.fullName || user?.username || profileLabel
+  const isAdmin = user?.role === 'ADMIN'
 
   const handleOpenProfile = () => {
     navigate('/profile')
@@ -210,20 +243,26 @@ export default function WorkspaceLayout({
 
   const toggleSidebar = () => {
     if (isDesktop) {
-      setSidebarOpen(!sidebarOpen)
-    } else {
-      setDrawerOpen(true)
+      setSidebarOpen((current) => !current)
+      return
     }
+
+    setDrawerOpen(true)
+  }
+
+  const handleSwitchWorkspace = () => {
+    navigate(shellVariant === 'admin' ? '/chat' : '/admin/users')
   }
 
   return (
-    <Box className={`app-shell ${isDesktop && !sidebarOpen ? 'is-sidebar-hidden' : ''}`}>
+    <Box className={`app-shell app-shell-${shellVariant} ${isDesktop && !sidebarOpen ? 'is-sidebar-hidden' : ''}`}>
       <Box component="aside" className="app-sidebar app-sidebar-desktop">
         <SidebarContent
-          navigationItems={navigationItems}
           closeDrawer={() => undefined}
+          navigationItems={navigationItems}
           onOpenProfile={handleOpenProfile}
           onSignOut={handleSignOut}
+          shellVariant={shellVariant}
         />
       </Box>
 
@@ -240,15 +279,23 @@ export default function WorkspaceLayout({
             </IconButton>
           </Stack>
           <SidebarContent
-            navigationItems={navigationItems}
             closeDrawer={() => setDrawerOpen(false)}
+            navigationItems={navigationItems}
             onOpenProfile={handleOpenProfile}
             onSignOut={handleSignOut}
+            shellVariant={shellVariant}
           />
         </Box>
       </Drawer>
 
-      <Box component="main" className="app-main" sx={{ ml: { lg: sidebarOpen ? `${SIDEBAR_WIDTH}px` : 0 }, transition: 'margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1)' }}>
+      <Box
+        component="main"
+        className="app-main"
+        sx={{
+          ml: { lg: sidebarOpen ? `${SIDEBAR_WIDTH}px` : 0 },
+          transition: 'margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        }}
+      >
         <Box className="app-topbar">
           <Box className="app-topbar__inner">
             <Stack direction="row" spacing={1.25} sx={{ alignItems: 'center', minWidth: 0 }}>
@@ -261,14 +308,19 @@ export default function WorkspaceLayout({
               </IconButton>
 
               <Box className="app-topbar__titles">
+                {eyebrow ? (
+                  <Typography variant="caption" className="app-topbar__eyebrow">
+                    {eyebrow}
+                  </Typography>
+                ) : null}
                 <Typography variant="h5" className="app-topbar__title">
                   {title}
                 </Typography>
-                {subtitle && (
+                {subtitle ? (
                   <Typography variant="body2" color="text.secondary">
                     {subtitle}
                   </Typography>
-                )}
+                ) : null}
               </Box>
             </Stack>
 
@@ -276,7 +328,7 @@ export default function WorkspaceLayout({
               <TextField
                 fullWidth
                 size="small"
-                placeholder="Search sessions, documents, agents..."
+                placeholder={searchPlaceholder}
                 slotProps={{
                   input: {
                     startAdornment: (
@@ -290,20 +342,42 @@ export default function WorkspaceLayout({
             </Box>
 
             <Stack className="app-topbar__actions" direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-              <Chip label={displayLabel} size="small" variant="outlined" />
+              {isAdmin ? (
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={<SwapHorizRoundedIcon fontSize="small" />}
+                  onClick={handleSwitchWorkspace}
+                >
+                  {shellVariant === 'admin' ? 'Client' : 'Admin'}
+                </Button>
+              ) : null}
+
+              {statusTag ? (
+                <Chip
+                  icon={<SecurityRoundedIcon />}
+                  label={statusTag}
+                  size="small"
+                  variant="outlined"
+                  className="app-status-chip"
+                />
+              ) : null}
 
               <Tooltip title="Notifications">
                 <IconButton aria-label="Notifications">
                   <NotificationsNoneRoundedIcon />
                 </IconButton>
               </Tooltip>
+
               <Tooltip title={mode === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}>
                 <IconButton aria-label="Theme toggle" onClick={toggleTheme}>
                   {mode === 'dark' ? <LightModeOutlinedIcon /> : <DarkModeOutlinedIcon />}
                 </IconButton>
               </Tooltip>
 
-
+              <Box className="app-profile-pill">
+                <Typography className="app-profile-pill__name">{displayLabel}</Typography>
+              </Box>
             </Stack>
           </Box>
         </Box>

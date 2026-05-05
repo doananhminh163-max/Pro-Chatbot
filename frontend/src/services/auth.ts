@@ -1,5 +1,12 @@
 import { http, authEndpoints } from './http'
 
+export interface UserPersonalization {
+  aiTone: string | null
+  aiLanguage: string | null
+  aiResponseLength: string | null
+  customInstructions: string | null
+}
+
 export interface AuthUser {
   id: string
   email: string
@@ -8,6 +15,11 @@ export interface AuthUser {
   avatar: string | null
   phone?: string | null
   role: 'CLIENT' | 'ADMIN'
+  personalization?: UserPersonalization
+}
+
+export function getDefaultRouteForRole(role: AuthUser['role']) {
+  return role === 'ADMIN' ? '/admin/users' : '/chat'
 }
 
 interface AuthResponse {
@@ -47,6 +59,10 @@ export async function updateProfile(payload: {
   fullName?: string
   phone?: string
   avatar?: string
+  aiTone?: string
+  aiLanguage?: string
+  aiResponseLength?: string
+  customInstructions?: string
 }) {
   const response = await http.patch<AuthResponse>(authEndpoints.profile, payload)
   return response.data.user

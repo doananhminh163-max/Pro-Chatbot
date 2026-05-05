@@ -30,5 +30,4 @@ export function validateStorageConfiguration() {
 export function ensureStorageDirectories() {
   ensureDirectory(env.userDocsRoot)
   ensureDirectory(env.sandboxRoot)
-  ensureDirectory(path.join(env.sandboxRoot, 'jobs'))
 }

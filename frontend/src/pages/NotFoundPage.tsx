@@ -11,8 +11,8 @@ export default function NotFoundPage() {
           <Typography variant="body2" color="text.secondary">
             This route does not exist in the current workspace map.
           </Typography>
-          <Button component={RouterLink} to="/dashboard" variant="contained" sx={{ mt: 1 }}>
-            Back to dashboard
+          <Button component={RouterLink} to="/chat" variant="contained" sx={{ mt: 1 }}>
+            Back to chatbot
           </Button>
         </Stack>
       </Paper>

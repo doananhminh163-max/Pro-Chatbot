@@ -6,13 +6,14 @@ import ClientLayout from './layouts/ClientLayout'
 import AdminLayout from './layouts/AdminLayout'
 import ProfileLayout from './layouts/ProfileLayout'
 import { useAuth } from './hooks/useAuth'
+import { getDefaultRouteForRole } from './services/auth'
 
 const LoginPage = lazy(() => import('./pages/public/LoginPage'))
 const RegisterPage = lazy(() => import('./pages/public/RegisterPage'))
 const ForgotPasswordPage = lazy(() => import('./pages/public/ForgotPasswordPage'))
 const ResetPasswordPage = lazy(() => import('./pages/public/ResetPasswordPage'))
+const OAuthCallbackPage = lazy(() => import('./pages/public/OAuthCallbackPage'))
 
-const DashboardPage = lazy(() => import('./pages/client/DashboardPage'))
 const ChatPage = lazy(() => import('./pages/client/ChatPage'))
 const DocumentsPage = lazy(() => import('./pages/client/DocumentsPage'))
 const SessionsPage = lazy(() => import('./pages/client/SessionsPage'))
@@ -22,8 +23,6 @@ const ProfilePage = lazy(() => import('./pages/client/ProfilePage'))
 const SettingsPage = lazy(() => import('./pages/client/SettingsPage'))
 
 const UsersPage = lazy(() => import('./pages/admin/UsersPage'))
-const SkillsPage = lazy(() => import('./pages/admin/SkillsPage'))
-const McpsPage = lazy(() => import('./pages/admin/McpsPage'))
 const AgentsPage = lazy(() => import('./pages/admin/AgentsPage'))
 const ProvidersPage = lazy(() => import('./pages/admin/ProvidersPage'))
 const ConfigPage = lazy(() => import('./pages/admin/ConfigPage'))
@@ -60,7 +59,7 @@ function PublicRoute({ children }: { children: ReactElement }) {
   }
 
   if (user) {
-    return <Navigate to="/dashboard" replace />
+    return <Navigate to={getDefaultRouteForRole(user.role)} replace />
   }
 
   return children
@@ -78,7 +77,7 @@ function AdminRoute({ children }: { children: ReactElement }) {
   }
 
   if (user.role !== 'ADMIN') {
-    return <Navigate to="/dashboard" replace />
+    return <Navigate to="/chat" replace />
   }
 
   return children
@@ -123,6 +122,7 @@ export default function App() {
               </PublicRoute>
             }
           />
+          <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
 
           <Route
             element={
@@ -131,7 +131,7 @@ export default function App() {
               </ProtectedRoute>
             }
           >
-            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/dashboard" element={<Navigate to="/chat" replace />} />
             <Route path="/chat" element={<ChatPage />} />
             <Route path="/documents" element={<DocumentsPage />} />
             <Route path="/sessions" element={<SessionsPage />} />
@@ -152,14 +152,12 @@ export default function App() {
 
           <Route
             element={
-              <AdminRoute>
+          <AdminRoute>
                 <AdminLayout />
               </AdminRoute>
             }
           >
             <Route path="/admin/users" element={<UsersPage />} />
-            <Route path="/admin/skills" element={<SkillsPage />} />
-            <Route path="/admin/mcps" element={<McpsPage />} />
             <Route path="/admin/agents" element={<AgentsPage />} />
             <Route path="/admin/providers" element={<ProvidersPage />} />
             <Route path="/admin/config" element={<ConfigPage />} />

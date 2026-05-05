@@ -1,7 +1,5 @@
-import path from 'node:path'
-import fs from 'node:fs'
 import { prisma } from '../config/prisma.js'
-import { env } from '../config/env.js'
+import { relocateDocumentAssets } from './document-storage.service.js'
 
 function normalizeWhitespace(value: string) {
   return value.replace(/\s+/g, ' ').trim()
@@ -48,6 +46,9 @@ export async function resolveSession(userId: string, sessionId?: string, seedCon
 export async function listSessions(userId: string) {
   const sessions = await prisma.chatSession.findMany({
     where: { userId },
+    orderBy: {
+      updatedAt: 'desc',
+    },
     include: {
       _count: {
         select: {
@@ -56,6 +57,9 @@ export async function listSessions(userId: string) {
       },
       messages: {
         take: 1,
+        orderBy: {
+          createdAt: 'desc',
+        },
       },
     },
   })
@@ -83,6 +87,9 @@ export async function getSessionMessages(userId: string, sessionId: string) {
       messages: {
         include: {
           documents: true,
+        },
+        orderBy: {
+          createdAt: 'asc',
         },
       },
       documents: true,
@@ -116,6 +123,36 @@ export async function updateSessionTitle(userId: string, sessionId: string, titl
   })
 }
 
+async function relocateSessionDocumentsToGeneral(userId: string, sessionId: string) {
+  const documents = await prisma.document.findMany({
+    where: {
+      userId,
+      sessionId,
+    },
+  })
+
+  for (const document of documents) {
+    const relocated = await relocateDocumentAssets({
+      userId,
+      fromSessionId: sessionId,
+      toSessionId: null,
+      documentId: document.id,
+      originalName: document.originalName,
+      fileName: document.fileName,
+      currentFilePath: document.filePath,
+      mimeType: document.mimeType,
+    })
+
+    await prisma.document.update({
+      where: { id: document.id },
+      data: {
+        sessionId: null,
+        filePath: relocated.filePath,
+      },
+    })
+  }
+}
+
 export async function deleteSession(userId: string, sessionId: string) {
   const session = await prisma.chatSession.findFirst({
     where: { id: sessionId, userId },
@@ -125,15 +162,7 @@ export async function deleteSession(userId: string, sessionId: string) {
     throw new Error('Session not found')
   }
 
-  // Xóa thư mục vật lý
-  const sessionDir = path.join(env.userDocsRoot, userId, sessionId)
-  if (fs.existsSync(sessionDir)) {
-    try {
-      fs.rmSync(sessionDir, { recursive: true, force: true })
-    } catch (err) {
-      console.error(`[session.service] Failed to remove directory ${sessionDir}`, err)
-    }
-  }
+  await relocateSessionDocumentsToGeneral(userId, sessionId)
 
   return prisma.chatSession.delete({
     where: { id: sessionId },
@@ -143,19 +172,11 @@ export async function deleteSession(userId: string, sessionId: string) {
 export async function deleteAllSessions(userId: string) {
   const sessions = await prisma.chatSession.findMany({
     where: { userId },
-    select: { id: true }
+    select: { id: true },
   })
 
-  // Xóa tất cả thư mục vật lý của các session
   for (const session of sessions) {
-    const sessionDir = path.join(env.userDocsRoot, userId, session.id)
-    if (fs.existsSync(sessionDir)) {
-      try {
-        fs.rmSync(sessionDir, { recursive: true, force: true })
-      } catch (err) {
-        console.error(`[session.service] Failed to remove directory ${sessionDir}`, err)
-      }
-    }
+    await relocateSessionDocumentsToGeneral(userId, session.id)
   }
 
   return prisma.chatSession.deleteMany({

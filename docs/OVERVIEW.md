@@ -25,7 +25,9 @@ Người dùng cuối sử dụng hệ thống để:
 
 ### Admin
 
-Giao diện quản trị hiện đã có cấu trúc màn hình, nhưng phần lớn vẫn ở trạng thái demo/scaffold. Trong code hiện tại, admin chưa có backend CRUD tương ứng cho các màn như Users, Skills, MCPs, Agents, Providers, Logs.
+Giao diện quản trị hiện đã có cấu trúc màn hình, nhưng phần lớn vẫn ở trạng thái demo/scaffold. Trong code hiện tại, admin chưa có backend CRUD tương ứng cho các màn như Users, Agents, Providers, Logs.
+
+Skill và MCP không còn được quản lý trong database của project; các capability kiểu này được kỳ vọng đặt trực tiếp trong `C:\Users\Admin\.agents`.
 
 ## 3. Giá trị cốt lõi của hệ thống
 
@@ -78,11 +80,12 @@ Các trường này được backend chèn vào prompt khi gọi CLI, giúp ph�
 - Tải lịch sử tin nhắn theo session.
 - Đổi tên session, xóa một session, xóa toàn bộ session.
 - Lấy cấu hình provider/model/agent từ database để hiển thị ở giao diện chat.
+- Toggle Memory ngay trong màn chat để bật/tắt việc dùng `global memory` cho lượt chat tiếp theo.
+- Memory page đọc dữ liệu thật từ backend (`global memories`) và hỗ trợ xóa memory toàn cục.
 
 ### Chức năng mới ở mức khung giao diện
 
 - Dashboard hiển thị số liệu mẫu, chưa lấy dữ liệu thật.
-- Memory page chưa có backend hay storage riêng.
 - Settings page mới xử lý theme ở frontend.
 - Admin Console mới mô phỏng dữ liệu quản trị.
 - Config page ở admin chưa ghi cấu hình xuống backend.
@@ -106,7 +109,7 @@ Các trường này được backend chèn vào prompt khi gọi CLI, giúp ph�
 1. Người dùng đính kèm file ở Chat hoặc upload từ Documents.
 2. Nếu file đang ở mức global của user, backend sẽ chuyển file vào thư mục session khi tin nhắn được gửi.
 3. Backend copy attachment sang `D:\Projects\user_docs\sandbox\jobs\<jobId>`.
-4. Broker chỉ đọc bản copy trong sandbox hoặc `attachments-context.txt` do backend chuẩn bị.
+4. Broker chỉ đọc các file Markdown đã extract trong sandbox và `attachments-context.txt` do backend chuẩn bị từ các file đó.
 5. Kết quả được lưu thành `Message` của AI.
 
 ### Luồng 3: tiếp tục công việc cũ
@@ -116,12 +119,21 @@ Các trường này được backend chèn vào prompt khi gọi CLI, giúp ph�
 3. Frontend tải lại toàn bộ lịch sử tin nhắn và danh sách tài liệu của phiên.
 4. Người dùng tiếp tục gửi tin nhắn mới trên cùng session đó.
 
+### Luồng 4: memory tự động theo từng lượt chat
+
+1. Trước khi gọi CLI, backend chỉ nạp `global memory` nếu người dùng bật Memory trong màn chat.
+2. Prompt chính chỉ chứa tối đa 50 tin nhắn gần nhất của người dùng, kèm personalization và `global memory`.
+3. Prompt text bị giới hạn `<= 2000` ký tự; nếu dài hơn, người dùng phải gửi file `<= 20MB`.
+4. Mỗi session chỉ chấp nhận tối đa 50 tin nhắn từ phía người dùng; vượt ngưỡng thì backend trả `SYSTEM` message yêu cầu tạo session mới.
+5. Sau khi có phản hồi AI, backend chạy thêm một bước extraction để cập nhật `global memory` từ transcript user gần nhất.
+6. Hệ thống upsert memory theo tiêu đề, cập nhật `lastUsedAt`, và tự cắt theo ngưỡng `GLOBAL=12`.
+
 ## 6. Ràng buộc và giới hạn hiện tại
 
 - Hệ thống phụ thuộc vào CLI cài sẵn trên máy chạy backend.
 - Backend yêu cầu nhiều biến môi trường bắt buộc, kể cả cho các tính năng chưa dùng ngay.
 - Chưa có cơ chế phân quyền admin riêng ở tầng API ngoài việc kiểm tra role ở frontend routing.
-- Chưa có parser/OCR thật cho `pdf`, `docx`, `xlsx` dù dependency đã được cài.
+- Đã có pipeline extract Markdown thật cho `xlsx`, `csv`, `pdf`, `docx`, `image`, và text trước khi attachment được đưa vào sandbox.
 - Chưa có fallback thực giữa nhiều provider trong `chat.service.ts`.
 - Hệ thống thiên về môi trường Windows và phụ thuộc vào việc cấu hình ACL đúng giữa `store` và `sandbox`.
 

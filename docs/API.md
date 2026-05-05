@@ -136,6 +136,36 @@ Tất cả endpoint chat yêu cầu đăng nhập.
 
 Trả danh sách provider/model/agent lấy từ database.
 
+### `GET /api/chat/memory`
+
+Trả tổng quan memory của user hiện tại.
+
+Response:
+
+```json
+{
+  "overview": {
+    "globalMemories": [
+      {
+        "id": "memory-id",
+        "scope": "GLOBAL",
+        "kind": "PREFERENCE",
+        "title": "Preferred language",
+        "content": "User prefers Vietnamese unless explicitly requested otherwise.",
+        "importance": 85,
+        "sessionId": null,
+        "sessionTitle": null,
+        "lastUsedAt": "2026-04-26T08:12:10.000Z"
+      }
+    ]
+  }
+}
+```
+
+### `DELETE /api/chat/memory/global`
+
+Xóa toàn bộ global memory của user hiện tại.
+
 ### `GET /api/chat/sessions`
 
 Trả danh sách session của user hiện tại.
@@ -180,7 +210,7 @@ Request:
   "content": "Hãy phân tích tài liệu này",
   "provider": "gemini",
   "model": "gemini-2.5-pro",
-  "memoryMode": "session",
+  "memoryEnabled": true,
   "agent": "report-strategist",
   "attachments": ["document-id-1", "document-id-2"]
 }
@@ -189,8 +219,12 @@ Request:
 Ghi chú:
 
 - `sessionId` có thể bỏ qua, backend sẽ tự tạo session mới.
-- `content` có thể rỗng nếu có file đính kèm; backend sẽ dùng mặc định `"đọc và tổng hợp lại"`.
+- `content` có thể rỗng nếu có file đính kèm; backend sẽ dùng mặc định `"Read and summarize the attachments."`.
+- `content` bị giới hạn `<= 2000` ký tự; nếu dài hơn, người dùng phải upload file `<= 20MB`.
 - `provider` hiện chấp nhận `gemini` và `opencode`.
+- `memoryEnabled` bật/tắt việc nạp `global memory` cho lượt chat hiện tại; mặc định là `true`.
+- Mỗi session chỉ chấp nhận tối đa `50` tin nhắn từ phía user. Nếu vượt ngưỡng, backend trả về `assistantMessage.sender = SYSTEM` với nội dung yêu cầu mở session mới.
+- Sau khi lưu phản hồi AI, backend sẽ chạy thêm một lượt extraction để cập nhật `global memory`.
 
 Nếu CLI lỗi, `assistantMessage.sender` sẽ là `SYSTEM`.
 
@@ -199,6 +233,15 @@ Nếu CLI lỗi, `assistantMessage.sender` sẽ là `SYSTEM`.
 Tất cả endpoint document yêu cầu đăng nhập.
 
 ### `POST /api/documents/upload`
+
+Upload một file và extract ngay sang Markdown trước khi file đó có thể được dùng trong chat.
+
+Ghi chú:
+
+- Chỉ các loại file có extractor mới được chấp nhận cho luồng chat attachment.
+- Backend hiện extract `xlsx`, `csv`, `pdf`, `docx`, `image`, và text sang `Document.extractedText`.
+- Nếu extraction thất bại hoặc loại file không được hỗ trợ, upload trả lỗi `400`.
+- Mỗi file upload bị giới hạn `<= 20MB`.
 
 Upload một file.
 

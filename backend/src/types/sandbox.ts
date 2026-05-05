@@ -1,7 +1,8 @@
 import type { ChatProvider } from '../services/chat.types.js'
 
 export interface SandboxBrokerExecuteRequest {
-  jobId: string
+  userId: string
+  sessionId: string
   provider: ChatProvider
   prompt: string
   model?: string

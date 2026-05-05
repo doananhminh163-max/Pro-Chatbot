@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { 
-  upload, 
+  uploadSingleDocument, 
   uploadDocumentHandler, 
   listDocumentsHandler, 
   downloadDocumentHandler, 
@@ -14,7 +14,7 @@ const documentRouter = Router()
 
 documentRouter.use(requireAuth)
 
-documentRouter.post('/upload', upload.single('file'), uploadDocumentHandler)
+documentRouter.post('/upload', uploadSingleDocument, uploadDocumentHandler)
 documentRouter.get('/', listDocumentsHandler)
 documentRouter.delete('/', deleteAllDocumentsHandler)
 documentRouter.get('/:id/download', downloadDocumentHandler)

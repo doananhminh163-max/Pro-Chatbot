@@ -20,6 +20,8 @@ export const authEndpoints = {
 
 export const chatEndpoints = {
   config: '/api/chat/config',
+  memory: '/api/chat/memory',
+  clearGlobalMemory: '/api/chat/memory/global',
   sessions: '/api/chat/sessions',
   sessionMessages: (sessionId: string) => `/api/chat/sessions/${sessionId}/messages`,
   updateSession: (sessionId: string) => `/api/chat/sessions/${sessionId}`,

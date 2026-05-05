@@ -7,7 +7,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// --- Enum ---
 enum Role {
   CLIENT
   ADMIN
@@ -19,41 +18,50 @@ enum SenderType {
   SYSTEM
 }
 
-// --- Models ---
+enum MemoryScope {
+  GLOBAL
+  SESSION
+}
+
+enum MemoryKind {
+  PROFILE
+  PREFERENCE
+  TASK
+  DOMAIN
+  FACT
+}
 
 model User {
-  id           String   @id @default(uuid())
-  username     String?  @unique
-  email        String   @unique
-  passwordHash String
-  fullName     String?
-  avatar       String?
-  phone        String?
+  id                     String   @id @default(uuid())
+  username               String?  @unique
+  email                  String   @unique
+  passwordHash           String
+  fullName               String?
+  avatar                 String?
+  phone                  String?
   resetPasswordToken     String?
   resetPasswordExpiresAt DateTime?
-  role         Role     @default(CLIENT)
-
-  // Personalization
-  aiTone        String?  @default("professional") // e.g., friendly, professional, concise
-  aiLanguage    String?  @default("Vietnamese")
-  aiResponseLength String? @default("balanced") // short, balanced, detailed
-  customInstructions String? // Lệnh bổ sung cố định cho mọi câu trả lời
+  role                   Role     @default(CLIENT)
+  aiTone                 String?  @default("professional")
+  aiLanguage             String?  @default("Vietnamese")
+  aiResponseLength       String?  @default("balanced")
+  customInstructions     String?
 
   documents Document[]
   sessions  ChatSession[]
+  memories  MemoryEntry[]
 }
 
 model Document {
-  id            String   @id @default(uuid())
-  userId        String
-  sessionId     String?  // Gắn tệp vào một session cụ thể (tùy chọn)
-  messageId     String?  // Gắn tệp vào một tin nhắn cụ thể
-  fileName      String // Tên file lưu trên ổ cứng (vd: 1224c42a.pdf)
-  originalName  String // Tên file gốc người dùng upload
-  filePath      String
-  mimeType      String
-  size          Int // Dung lượng (bytes)
-  extractedText String? // Chứa text OCR hoặc parse ra được
+  id           String   @id @default(uuid())
+  userId       String
+  sessionId    String?
+  messageId    String?
+  fileName     String
+  originalName String
+  filePath     String
+  mimeType     String
+  size         Int
 
   user    User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   session ChatSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
@@ -61,15 +69,21 @@ model Document {
 }
 
 model ChatSession {
-  id        String   @id @default(uuid())
-  userId    String
-  agentId   String? // Session này đang xài Agent nào (nếu có)
-  title     String // Tiêu đề session sinh tự động
+  id              String   @id @default(uuid())
+  userId          String
+  agentId         String?
+  title           String
+  summary         String?
+  activeTask      String?
+  memoryUpdatedAt DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @default(now()) @updatedAt
 
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   agent     Agent?    @relation(fields: [agentId], references: [id], onDelete: SetNull)
   messages  Message[]
   documents Document[]
+  memories  MemoryEntry[]
 }
 
 model Message {
@@ -77,73 +91,53 @@ model Message {
   sessionId String
   sender    SenderType
   content   String
+  createdAt DateTime   @default(now())
 
   session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   documents Document[]
 }
 
+model MemoryEntry {
+  id         String       @id @default(uuid())
+  userId     String
+  sessionId  String?
+  scope      MemoryScope
+  kind       MemoryKind   @default(FACT)
+  title      String
+  content    String
+  importance Int          @default(50)
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  lastUsedAt DateTime     @default(now())
+
+  user    User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session ChatSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([userId, scope, lastUsedAt])
+  @@index([sessionId, scope, lastUsedAt])
+}
+
 model Provider {
-  id        String   @id @default(uuid())
-  name      String   @unique
-  config    String? // JSON string để lưu api key / base url tự config
+  id     String  @id @default(uuid())
+  name   String  @unique
+  config String?
 
   models Model[]
 }
 
 model Model {
-  id         String   @id @default(uuid())
+  id         String @id @default(uuid())
   providerId String
-  name       String // VD: gemini-1.5-pro, gpt-4o
+  name       String
 
   provider Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
 }
 
 model Agent {
-  id           String   @id @default(uuid())
-  name         String   @unique
+  id           String @id @default(uuid())
+  name         String @unique
   description  String?
   systemPrompt String?
 
   sessions ChatSession[]
-  skills   AgentSkill[]
-  mcps     AgentMCP[]
-}
-
-model Skill {
-  id          String   @id @default(uuid())
-  name        String   @unique
-  description String?
-  command     String? // Lệnh tương tác CLI
-
-  agents AgentSkill[]
-}
-
-model MCP {
-  id          String   @id @default(uuid())
-  name        String   @unique
-  description String?
-  config      String? // JSON config file
-
-  agents AgentMCP[]
-}
-
-// Bảng trung gian (Many-to-Many)
-model AgentSkill {
-  agentId String
-  skillId String
-
-  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  skill Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
-
-  @@id([agentId, skillId])
-}
-
-model AgentMCP {
-  agentId String
-  mcpId   String
-
-  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  mcp   MCP   @relation(fields: [mcpId], references: [id], onDelete: Cascade)
-
-  @@id([agentId, mcpId])
 }

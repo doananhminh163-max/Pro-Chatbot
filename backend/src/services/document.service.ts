@@ -1,5 +1,5 @@
 import { prisma } from '../config/prisma.js'
-import fs from 'node:fs'
+import { deleteDocumentAssets } from './document-storage.service.js'
 
 export async function createDocument(data: {
   userId: string
@@ -39,11 +39,17 @@ export async function deleteDocument(id: string, userId: string) {
     where: { id, userId }
   })
 
-  if (doc && fs.existsSync(doc.filePath)) {
+  if (doc) {
     try {
-      fs.unlinkSync(doc.filePath)
+      await deleteDocumentAssets({
+        userId: doc.userId,
+        sessionId: doc.sessionId,
+        documentId: doc.id,
+        originalName: doc.originalName,
+        filePath: doc.filePath,
+      })
     } catch (err) {
-      console.error(`[document.service] Failed to delete file ${doc.filePath}`, err)
+      console.error(`[document.service] Failed to delete document assets for ${doc.filePath}`, err)
     }
   }
 
@@ -58,12 +64,16 @@ export async function deleteAllUserDocuments(userId: string) {
   })
 
   for (const doc of docs) {
-    if (fs.existsSync(doc.filePath)) {
-      try {
-        fs.unlinkSync(doc.filePath)
-      } catch (err) {
-        console.error(`[document.service] Failed to delete file ${doc.filePath}`, err)
-      }
+    try {
+      await deleteDocumentAssets({
+        userId: doc.userId,
+        sessionId: doc.sessionId,
+        documentId: doc.id,
+        originalName: doc.originalName,
+        filePath: doc.filePath,
+      })
+    } catch (err) {
+      console.error(`[document.service] Failed to delete document assets for ${doc.filePath}`, err)
     }
   }
 

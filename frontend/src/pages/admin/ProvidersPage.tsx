@@ -4,7 +4,6 @@ const columns = [
   { key: 'name', label: 'Name' },
   { key: 'description', label: 'Description' },
   { key: 'version', label: 'Version' },
-  { key: 'status', label: 'Status' },
 ]
 
 const rows = [
@@ -35,7 +34,6 @@ export default function ProvidersPage() {
   return (
     <AdminCrudTable
       title="Providers"
-      subtitle="Configure AI provider connectivity, routing priority, and health status"
       columns={columns}
       rows={rows}
       addLabel="Add Provider"

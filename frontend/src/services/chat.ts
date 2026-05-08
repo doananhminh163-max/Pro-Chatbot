@@ -95,6 +95,7 @@ export interface ChatConfig {
     id: string
     name: string
     description: string | null
+    systemPrompt?: string | null
   }[]
 }
 

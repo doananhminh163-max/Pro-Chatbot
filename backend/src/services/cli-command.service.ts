@@ -27,6 +27,7 @@ const BLOCKED_EXECUTABLES = new Set([
 const SUSPICIOUS_TOKEN_PATTERN = /[|;&><`]/
 const WINDOWS_NPM_SHIMS: Record<string, string[]> = {
   gemini: ['node_modules', '@google', 'gemini-cli', 'bundle', 'gemini.js'],
+  opencode: ['node_modules', 'opencode-ai', 'bin', 'opencode'],
 }
 
 function providerToCommand(provider: ChatProvider) {
@@ -80,6 +81,15 @@ function normalizeProviderSpecificArgs(provider: ChatProvider, parts: string[]) 
     }
 
     if (lowerToken.startsWith('--prompt=')) {
+      continue
+    }
+
+    if (lowerToken === '--policy' || lowerToken === '--admin-policy') {
+      index += 1
+      continue
+    }
+
+    if (lowerToken.startsWith('--policy=') || lowerToken.startsWith('--admin-policy=')) {
       continue
     }
 
@@ -144,7 +154,11 @@ function resolveWindowsNpmShim(parts: string[]) {
   return [process.execPath, entrypoint, ...parts.slice(1)]
 }
 
-export function resolveCliCommand(provider: ChatProvider, prompt: string, model?: string): ResolvedCommand {
+export function resolveCliCommand(
+  provider: ChatProvider,
+  prompt: string,
+  model?: string,
+): ResolvedCommand {
   const template = providerToCommand(provider).trim()
 
   if (!template) {
@@ -179,7 +193,14 @@ export function resolveCliCommand(provider: ChatProvider, prompt: string, model?
     parts.push('--model', model)
   }
 
-  parts.push('--prompt', prompt)
+  if (provider === 'gemini') {
+    parts.push('--prompt', prompt)
+  } else {
+    if (!parts.includes('--pure')) {
+      parts.push('--pure')
+    }
+    parts.push(prompt)
+  }
 
   return {
     executable: parts[0],

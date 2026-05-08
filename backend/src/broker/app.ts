@@ -6,6 +6,7 @@ import { z } from 'zod'
 import { env } from '../config/env.js'
 import { ensureStorageDirectories, validateStorageConfiguration } from '../config/storage.js'
 import { resolveCliCommand } from '../services/cli-command.service.js'
+import { ensureOpenCodeRuntime } from '../services/opencode-runtime.service.js'
 import { getSandboxWorkspaceDir, pruneExpiredSandboxJobs } from '../services/sandbox-workspace.service.js'
 import type { ChatProvider } from '../services/chat.types.js'
 
@@ -72,6 +73,31 @@ function sanitizeChildEnv() {
   return childEnv
 }
 
+async function buildChildEnv(provider: ChatProvider, userId: string, sessionId: string) {
+  const childEnv = sanitizeChildEnv()
+
+  if (provider !== 'opencode') {
+    return childEnv
+  }
+
+  const runtime = await ensureOpenCodeRuntime(userId, sessionId)
+  const homeRoot = path.parse(runtime.homeDir).root
+  const homeDrive = homeRoot.replace(/[\\\/]+$/, '')
+
+  childEnv.USERPROFILE = runtime.homeDir
+  childEnv.HOME = runtime.homeDir
+  childEnv.HOMEDRIVE = homeDrive
+  childEnv.HOMEPATH = runtime.homeDir.slice(homeDrive.length)
+  childEnv.APPDATA = path.join(runtime.homeDir, 'AppData', 'Roaming')
+  childEnv.LOCALAPPDATA = path.join(runtime.homeDir, 'AppData', 'Local')
+  childEnv.OPENCODE_CONFIG = runtime.configPath
+  childEnv.OPENCODE_CONFIG_DIR = runtime.configDir
+  childEnv.OPENCODE_DISABLE_AUTOUPDATE = '1'
+  childEnv.OPENCODE_DISABLE_CLAUDE_CODE = '1'
+
+  return childEnv
+}
+
 async function executeSandboxCli(
   provider: ChatProvider,
   prompt: string,
@@ -79,8 +105,9 @@ async function executeSandboxCli(
   sessionId: string,
   model?: string,
 ) {
-  const command = resolveCliCommand(provider, prompt, model)
   const workspaceDir = getSandboxWorkspaceDir(userId, sessionId)
+  const command = resolveCliCommand(provider, prompt, model)
+  const childEnv = await buildChildEnv(provider, userId, sessionId)
   const contextFile = path.join(workspaceDir, 'attachments-context.txt')
 
   let stdinPayload = ''
@@ -96,7 +123,7 @@ async function executeSandboxCli(
       shell: false,
       windowsHide: true,
       cwd: workspaceDir,
-      env: sanitizeChildEnv(),
+      env: childEnv,
       stdio: ['pipe', 'pipe', 'pipe'],
     })
 

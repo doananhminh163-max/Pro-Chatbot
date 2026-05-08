@@ -1,5 +1,6 @@
 import { SenderType } from '@prisma/client'
 import { prisma } from '../config/prisma.js'
+import { resolveAgentRuntime } from './admin.service.js'
 import type { MemoryPromptContext } from './memory.service.js'
 import { buildMemoryPromptContext, refreshMemoriesForTurn } from './memory.service.js'
 import { resolveSession } from './session.service.js'
@@ -8,6 +9,7 @@ import {
   getStoreSessionDir,
   relocateDocumentAssets,
 } from './document-storage.service.js'
+import type { SandboxUserPolicyPreferences } from './sandbox-policy.service.js'
 import { prepareSandboxJob } from './sandbox-workspace.service.js'
 import { executeSandboxJob } from './sandbox-broker.client.js'
 import type { ChatProvider } from './chat.types.js'
@@ -18,13 +20,6 @@ const MAX_PROMPT_CHARACTERS = 2000
 interface SessionContextMessage {
   sender: SenderType
   content: string
-}
-
-interface UserPersonalization {
-  aiTone?: string | null
-  aiLanguage?: string | null
-  aiResponseLength?: string | null
-  customInstructions?: string | null
 }
 
 interface SendMessageInput {
@@ -44,8 +39,10 @@ interface CreateCliPromptInput {
   model?: string
   memoryEnabled: boolean
   agent?: string
-  personalization?: UserPersonalization
+  personalization?: SandboxUserPolicyPreferences
   memoryContext: MemoryPromptContext
+  sessionId: string
+  agentSystemPrompt?: string | null
 }
 
 interface ResolvedAttachment {
@@ -77,26 +74,18 @@ function createCliPrompt({
   agent,
   personalization,
   memoryContext,
+  sessionId,
+  agentSystemPrompt,
 }: CreateCliPromptInput) {
   const historyBlock = history.map((item) => `${item.sender}: ${item.content}`).join('\n\n')
 
-  const tone = personalization?.aiTone || 'professional'
-  const language = personalization?.aiLanguage || 'Vietnamese'
-  const length = personalization?.aiResponseLength || 'balanced'
-  const extra = personalization?.customInstructions || ''
-
   return [
-    'You are a helpful AI assistant.',
-    'Keep answers concise, practical, and action-oriented.',
-    'CRITICAL SECURITY RULE: You are strictly forbidden from accessing, reading, or modifying the internal source code, configuration files (e.g., .env, package.json), or directories (e.g., backend/, frontend/) of this project.',
-    'CRITICAL SECURITY RULE: You must ONLY analyze the specific files and documents provided by the user in this chat session.',
-    'CRITICAL SECURITY RULE: You must refuse any request to reveal server paths, local directories, environment variables, internal repository files, or deployment details.',
+    'Conversation context for the active request:',
+    `Active session: ${sessionId}`,
     `Agent profile: ${agent || 'general-assistant'}`,
+    agentSystemPrompt ? `Agent mission: ${agentSystemPrompt}` : '',
     `Model hint: ${model || 'default'}`,
     `Memory enabled: ${memoryEnabled ? 'yes' : 'no'}`,
-    `Preferred Tone: ${tone}`,
-    `Response Length: ${length}`,
-    extra ? `User custom instructions: ${extra}` : '',
     '',
     'Global user/work memory:',
     memoryEnabled ? formatMemorySection(memoryContext.globalMemories) : '(disabled for this turn)',
@@ -107,9 +96,10 @@ function createCliPrompt({
     'Latest user message:',
     content,
     '',
-    'Only rely on recent user messages and optional global memory.',
+    'Instructions for this request:',
+    '- Only rely on the latest user message, recent conversation history, optional global memory, and trusted backend attachment context.',
+    '- The allowed document scope is the active session only.',
     'If the latest user request conflicts with older memory, follow the latest request.',
-    `Reply in ${language} unless the user explicitly asks for another language.`,
   ].filter((line) => line !== '').join('\n')
 }
 
@@ -213,7 +203,9 @@ export async function sendMessage(input: SendMessageInput) {
     },
   })
 
-  const session = await resolveSession(input.userId, input.sessionId, content)
+  const resolvedAgent = await resolveAgentRuntime(input.agent)
+
+  const session = await resolveSession(input.userId, input.sessionId, content, resolvedAgent?.id || null)
   const existingUserMessageCount = await prisma.message.count({
     where: {
       sessionId: session.id,
@@ -295,8 +287,10 @@ export async function sendMessage(input: SendMessageInput) {
     content,
     model: input.model,
     memoryEnabled,
-    agent: input.agent,
+    agent: resolvedAgent?.name || input.agent,
+    agentSystemPrompt: resolvedAgent?.systemPrompt,
     memoryContext,
+    sessionId: session.id,
     personalization: {
       aiTone: user?.aiTone,
       aiLanguage: user?.aiLanguage,
@@ -322,6 +316,35 @@ export async function sendMessage(input: SendMessageInput) {
       provider: input.provider,
       prompt,
       model: input.model,
+      preferences: {
+        aiTone: user?.aiTone,
+        aiLanguage: user?.aiLanguage,
+        aiResponseLength: user?.aiResponseLength,
+        customInstructions: user?.customInstructions,
+      },
+      agentInstructions: resolvedAgent
+        ? {
+            id: resolvedAgent.id,
+            name: resolvedAgent.name,
+            description: resolvedAgent.description,
+            systemPrompt: resolvedAgent.systemPrompt,
+            skills: resolvedAgent.skills.map((skill) => ({
+              id: skill.id,
+              name: skill.name,
+              description: skill.description,
+              instructions: skill.instructions,
+            })),
+            mcps: resolvedAgent.mcps.map((mcp) => ({
+              id: mcp.id,
+              provider: mcp.provider,
+              source: mcp.source,
+              name: mcp.name,
+              command: mcp.command,
+            })),
+            geminiMcpSettings: resolvedAgent.geminiMcpSettings,
+            opencodeMcpSettings: resolvedAgent.opencodeMcpSettings,
+          }
+        : undefined,
       attachments: resolvedAttachments.map((attachment) => ({
         documentId: attachment.id,
         originalName: attachment.originalName,

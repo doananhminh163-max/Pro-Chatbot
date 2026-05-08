@@ -1,5 +1,20 @@
 # Hướng dẫn cài đặt và vận hành
 
+## Mục lục
+
+1. Yêu cầu môi trường
+2. Cài dependency
+3. Cấu hình biến môi trường
+4. Điều rất quan trọng về `.env`
+5. Chuẩn bị Prisma
+6. Chạy dự án
+7. Seed dữ liệu
+8. Đường dẫn và lưu trữ tài liệu
+9. Cấu hình CLI
+10. Kiểm tra nhanh sau khi khởi động
+11. Các lỗi thường gặp
+12. Khuyến nghị vận hành
+
 ## 1. Yêu cầu môi trường
 
 ### Công cụ bắt buộc
@@ -195,7 +210,7 @@ Nếu các thư mục này không tồn tại, backend hoặc broker sẽ tự t
 
 ```env
 GEMINI_CLI_COMMAND=gemini chat --model={model}
-OPENCODE_CLI_COMMAND=opencode chat --mode=assistant --stdin --model={model}
+OPENCODE_CLI_COMMAND=opencode run --model={model}
 ```
 
 Placeholder hợp lệ:

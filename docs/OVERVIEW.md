@@ -1,57 +1,66 @@
 # Tổng quan dự án
 
+## Mục lục
+
+1. Dự án này là gì
+2. Đối tượng sử dụng
+3. Giá trị cốt lõi
+4. Tính năng đã hoạt động
+5. Khu vực chưa hoàn thiện
+6. Luồng sử dụng điển hình
+7. Tài liệu nên đọc tiếp
+
 ## 1. Dự án này là gì
 
-`Pro Chatbot` là một ứng dụng web full-stack để người dùng:
+`Pro Chatbot` là một ứng dụng web full-stack cho phép người dùng:
 
-- trò chuyện với AI thông qua các CLI cục bộ;
-- tải lên và quản lý tài liệu cá nhân;
+- trò chuyện với AI thông qua runtime/CLI chạy ở backend;
+- upload và quản lý tài liệu cá nhân;
 - gắn tài liệu vào từng phiên chat;
-- lưu lịch sử hội thoại và tiếp tục làm việc theo session;
-- cá nhân hóa phong cách phản hồi của AI theo hồ sơ người dùng.
+- lưu lịch sử hội thoại theo session;
+- cá nhân hóa cách AI phản hồi.
 
-Hệ thống không phải là một chatbot SaaS dùng API trực tiếp từ trình duyệt. Thay vào đó, backend đóng vai trò điều phối: nhận request từ frontend, dựng prompt, gọi CLI AI trên máy chủ và lưu lại kết quả.
+Hệ thống không gọi model trực tiếp từ trình duyệt. Frontend gọi backend, backend dựng prompt, chuẩn bị sandbox/runtime, gọi CLI, và lưu kết quả.
 
 ## 2. Đối tượng sử dụng
 
 ### Client
 
-Người dùng cuối sử dụng hệ thống để:
+Người dùng cuối có thể:
 
-- đăng nhập và quản lý hồ sơ cá nhân;
-- gửi câu hỏi cho AI;
-- đính kèm tài liệu phục vụ phân tích;
-- xem và quản lý lịch sử làm việc.
+- đăng nhập và quản lý hồ sơ;
+- chat với AI;
+- đính kèm tài liệu để phân tích;
+- xem và tiếp tục các session cũ;
+- cấu hình personalization và memory.
 
 ### Admin
 
-Giao diện quản trị hiện đã có cấu trúc màn hình, nhưng phần lớn vẫn ở trạng thái demo/scaffold. Trong code hiện tại, admin chưa có backend CRUD tương ứng cho các màn như Users, Agents, Providers, Logs.
+Khu admin hiện đã có backend thật dưới namespace `/api/admin`.
 
-Skill và MCP không còn được quản lý trong database của project; các capability kiểu này được kỳ vọng đặt trực tiếp trong `C:\Users\Admin\.agents`.
+Trạng thái hiện tại:
 
-## 3. Giá trị cốt lõi của hệ thống
+- `Users`: đọc dữ liệu thật từ backend, read-only.
+- `Providers`: đọc provider/model inventory thật, read-only.
+- `Agents`: có CRUD thật, audit history, skill catalog, MCP catalog.
+- `Config`: đọc runtime config thật, read-only.
+- `Logs`: đọc system logs thật, có filter.
+
+Skill và MCP không nằm trong schema Prisma. Chúng được quản lý ngoài project và nạp vào runtime theo agent.
+
+## 3. Giá trị cốt lõi
 
 ### Chat theo session
 
-Mỗi phiên chat được lưu thành một `ChatSession`, có tiêu đề riêng và danh sách `Message` riêng. Điều này cho phép người dùng quay lại một cuộc hội thoại cũ mà không làm trộn ngữ cảnh giữa các chủ đề.
+Mỗi cuộc hội thoại được lưu thành một `ChatSession` riêng, có title riêng và danh sách `Message` riêng.
 
-### Quản lý tài liệu theo người dùng và phiên
+### Quản lý tài liệu theo user và session
 
-Tài liệu được lưu ra filesystem theo cây thư mục lưu trữ thật:
+Tài liệu được lưu trên filesystem. Khi cần, backend có thể:
 
-```text
-D:\Projects\user_docs\
-├── store\
-│   └── <userId>\
-│       ├── <file>
-│       └── <sessionId>\
-│           └── <file>
-└── sandbox\
-    └── jobs\
-        └── <jobId>\
-```
-
-Điểm đặc biệt là khi người dùng gửi tin nhắn có đính kèm file, backend có thể di chuyển file vật lý từ thư mục người dùng sang thư mục của session tương ứng để đồng bộ trạng thái lưu trữ. Sau đó backend copy attachment sang workspace sandbox riêng cho broker. Broker không được làm việc trực tiếp trong cây `store`.
+- chuyển file từ user scope sang session scope;
+- extract Markdown/OCR vào `Document.extractedText`;
+- copy artifact cần thiết vào sandbox job.
 
 ### Cá nhân hóa AI
 
@@ -62,86 +71,69 @@ Mỗi user có thể lưu:
 - `aiResponseLength`
 - `customInstructions`
 
-Các trường này được backend chèn vào prompt khi gọi CLI, giúp phản hồi bám theo sở thích người dùng trên mọi phiên.
+Backend chèn các thông tin này vào runtime request.
 
-## 4. Phạm vi chức năng thực tế
+## 4. Tính năng đã hoạt động
 
-### Chức năng đã hoạt động
+- Đăng ký / đăng nhập email-password.
+- Đăng nhập bằng username.
+- Google OAuth.
+- Quên mật khẩu / reset mật khẩu.
+- Cập nhật profile và personalization.
+- Upload / preview / download / xóa document.
+- Tạo session mới, đổi tên session, xóa session, xóa toàn bộ session.
+- Chat với provider/model/agent.
+- Toggle global memory ngay trong màn chat.
+- Memory page đọc dữ liệu thật và cho phép xóa global memory.
+- Admin users overview đọc dữ liệu thật.
+- Admin providers catalog đọc dữ liệu thật.
+- Admin agents workspace có CRUD thật.
+- Admin config đọc runtime config thật.
+- Admin logs đọc system log thật.
 
-- Đăng ký tài khoản bằng email/mật khẩu.
-- Đăng nhập bằng email hoặc username.
-- Đăng nhập bằng Google OAuth.
-- Quên mật khẩu và đặt lại mật khẩu qua email.
-- Cập nhật hồ sơ cá nhân.
-- Lưu cấu hình personalization cho AI.
-- Upload tài liệu.
-- Xem danh sách tài liệu, preview, download, xóa.
-- Tạo session chat mới khi gửi tin đầu tiên.
-- Tải lịch sử tin nhắn theo session.
-- Đổi tên session, xóa một session, xóa toàn bộ session.
-- Lấy cấu hình provider/model/agent từ database để hiển thị ở giao diện chat.
-- Toggle Memory ngay trong màn chat để bật/tắt việc dùng `global memory` cho lượt chat tiếp theo.
-- Memory page đọc dữ liệu thật từ backend (`global memories`) và hỗ trợ xóa memory toàn cục.
+## 5. Khu vực chưa hoàn thiện
 
-### Chức năng mới ở mức khung giao diện
+- Dashboard vẫn dùng dữ liệu mẫu.
+- Settings page ngoài theme vẫn chủ yếu là placeholder.
+- Users / Providers / Config / Logs trong admin chủ yếu là read-only, chưa có write actions đầy đủ.
+- Chat hiện chưa stream token thật từng phần từ server.
+- Chưa có health check riêng và metrics sâu hơn.
 
-- Dashboard hiển thị số liệu mẫu, chưa lấy dữ liệu thật.
-- Settings page mới xử lý theme ở frontend.
-- Admin Console mới mô phỏng dữ liệu quản trị.
-- Config page ở admin chưa ghi cấu hình xuống backend.
-- Log page chưa nối vào hệ thống log runtime thực.
+## 6. Luồng sử dụng điển hình
 
-## 5. Luồng sử dụng điển hình
+### Tạo một session chat mới
 
-### Luồng 1: bắt đầu một phiên chat mới
-
-1. Người dùng đăng nhập.
+1. User đăng nhập.
 2. Mở trang Chat.
-3. Chọn agent, provider, model.
-4. Gõ câu hỏi hoặc đính kèm file.
-5. Frontend upload file trước, lấy `documentId`.
+3. Chọn provider, model, agent.
+4. Nhập prompt hoặc đính kèm file.
+5. Frontend upload file trước nếu cần.
 6. Frontend gọi API chat.
-7. Backend tạo `ChatSession` nếu chưa có session.
-8. Backend gọi CLI AI và lưu phản hồi.
+7. Backend tạo session nếu chưa có.
+8. Backend chuẩn bị sandbox/runtime và gọi CLI.
+9. Kết quả được lưu thành `Message`.
 
-### Luồng 2: phân tích tài liệu
+### Phân tích tài liệu
 
-1. Người dùng đính kèm file ở Chat hoặc upload từ Documents.
-2. Nếu file đang ở mức global của user, backend sẽ chuyển file vào thư mục session khi tin nhắn được gửi.
-3. Backend copy attachment sang `D:\Projects\user_docs\sandbox\jobs\<jobId>`.
-4. Broker chỉ đọc các file Markdown đã extract trong sandbox và `attachments-context.txt` do backend chuẩn bị từ các file đó.
-5. Kết quả được lưu thành `Message` của AI.
+1. User upload hoặc đính kèm file.
+2. Backend extract Markdown/OCR.
+3. File được đưa vào sandbox job theo session.
+4. Runtime chỉ làm việc trong sandbox, không trực tiếp trên cây `store`.
 
-### Luồng 3: tiếp tục công việc cũ
+### Quản trị agent
 
-1. Người dùng vào trang Sessions.
-2. Chọn một session cũ.
-3. Frontend tải lại toàn bộ lịch sử tin nhắn và danh sách tài liệu của phiên.
-4. Người dùng tiếp tục gửi tin nhắn mới trên cùng session đó.
+1. Admin vào `/admin/agents`.
+2. Chọn profile bằng dropdown hoặc tạo draft mới.
+3. Nếu cần, bấm `Show Detail` để mở prompt/skills/MCP/audit.
+4. Chỉnh sửa profile.
+5. Bấm `Update` hoặc `Create Agent`.
 
-### Luồng 4: memory tự động theo từng lượt chat
+## 7. Tài liệu nên đọc tiếp
 
-1. Trước khi gọi CLI, backend chỉ nạp `global memory` nếu người dùng bật Memory trong màn chat.
-2. Prompt chính chỉ chứa tối đa 50 tin nhắn gần nhất của người dùng, kèm personalization và `global memory`.
-3. Prompt text bị giới hạn `<= 2000` ký tự; nếu dài hơn, người dùng phải gửi file `<= 20MB`.
-4. Mỗi session chỉ chấp nhận tối đa 50 tin nhắn từ phía người dùng; vượt ngưỡng thì backend trả `SYSTEM` message yêu cầu tạo session mới.
-5. Sau khi có phản hồi AI, backend chạy thêm một bước extraction để cập nhật `global memory` từ transcript user gần nhất.
-6. Hệ thống upsert memory theo tiêu đề, cập nhật `lastUsedAt`, và tự cắt theo ngưỡng `GLOBAL=12`.
+- Kiến trúc tổng thể: `ARCHITECTURE.md`
+- Schema và quan hệ dữ liệu: `DATABASE.md`
+- API chi tiết: `API.md`
+- Setup và môi trường: `SETUP.md`
+- Trạng thái frontend/UI: `UI_DESIGN.md`
+- Sandbox broker: `SANDBOX_BROKER_SPEC.md`
 
-## 6. Ràng buộc và giới hạn hiện tại
-
-- Hệ thống phụ thuộc vào CLI cài sẵn trên máy chạy backend.
-- Backend yêu cầu nhiều biến môi trường bắt buộc, kể cả cho các tính năng chưa dùng ngay.
-- Chưa có cơ chế phân quyền admin riêng ở tầng API ngoài việc kiểm tra role ở frontend routing.
-- Đã có pipeline extract Markdown thật cho `xlsx`, `csv`, `pdf`, `docx`, `image`, và text trước khi attachment được đưa vào sandbox.
-- Chưa có fallback thực giữa nhiều provider trong `chat.service.ts`.
-- Hệ thống thiên về môi trường Windows và phụ thuộc vào việc cấu hình ACL đúng giữa `store` và `sandbox`.
-
-## 7. Khi nào nên đọc tiếp tài liệu nào
-
-- Muốn hiểu kiến trúc và luồng dữ liệu: xem `ARCHITECTURE.md`
-- Muốn hiểu schema Prisma và quan hệ dữ liệu: xem `DATABASE.md`
-- Muốn tích hợp hoặc test API: xem `API.md`
-- Muốn chạy dự án và cấu hình môi trường: xem `SETUP.md`
-- Muốn nắm trạng thái màn hình frontend: xem `UI_DESIGN.md`
-- Muốn hiểu về sandbox broker: xem `SANDBOX_BROKER_SPEC.md`

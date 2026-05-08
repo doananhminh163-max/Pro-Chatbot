@@ -31,16 +31,31 @@ const MAX_ATTACHMENT_SIZE_BYTES = 20 * 1024 * 1024
 
 const DEFAULT_PROVIDER_OPTIONS: Array<{ value: ChatProvider; label: string }> = [
   { value: 'gemini', label: 'Gemini CLI' },
+  { value: 'opencode', label: 'OpenCode' },
 ]
 
-const DEFAULT_MODEL_OPTIONS = [
-  { value: 'gemini-3.1-pro-preview', label: 'gemini-3.1-pro-preview' },
-  { value: 'gemini-3-flash-preview', label: 'gemini-3-flash-preview' },
-  { value: 'gemini-3.1-flash-lite-preview', label: 'gemini-3.1-flash-lite-preview' },
-  { value: 'gemini-2.5-pro', label: 'gemini-2.5-pro' },
-  { value: 'gemini-2.5-flash', label: 'gemini-2.5-flash' },
-  { value: 'gemini-2.5-flash-lite', label: 'gemini-2.5-flash-lite' },
-]
+const PROVIDER_LABELS: Record<ChatProvider, string> = {
+  gemini: 'Gemini CLI',
+  opencode: 'OpenCode',
+}
+
+const DEFAULT_MODEL_OPTIONS: Record<ChatProvider, Array<{ value: string; label: string }>> = {
+  gemini: [
+    { value: 'gemini-3.1-pro-preview', label: 'gemini-3.1-pro-preview' },
+    { value: 'gemini-3-flash-preview', label: 'gemini-3-flash-preview' },
+    { value: 'gemini-3.1-flash-lite-preview', label: 'gemini-3.1-flash-lite-preview' },
+    { value: 'gemini-2.5-pro', label: 'gemini-2.5-pro' },
+    { value: 'gemini-2.5-flash', label: 'gemini-2.5-flash' },
+    { value: 'gemini-2.5-flash-lite', label: 'gemini-2.5-flash-lite' },
+  ],
+  opencode: [
+    { value: 'opencode/minimax-m2.5-free', label: 'opencode/minimax-m2.5-free' },
+    { value: 'opencode/ling-2.6-flash', label: 'opencode/ling-2.6-flash' },
+    { value: 'opencode/hy3-preview-free', label: 'opencode/hy3-preview-free' },
+    { value: 'opencode/nemotron-3-super-free', label: 'opencode/nemotron-3-super-free' },
+    { value: 'opencode/big-pickle', label: 'opencode/big-pickle' },
+  ],
+}
 
 const DEFAULT_AGENT_OPTIONS = [
   { value: 'report-strategist', label: 'Report Strategist' },
@@ -83,7 +98,7 @@ function toOptimisticMessage(sessionId: string | null, content: string, attachme
 
 export default function ChatPage() {
   const [config, setConfig] = useState<ChatConfig | null>(null)
-  const [agent, setAgent] = useState('report-strategist')
+  const [agent, setAgent] = useState('')
   const [provider, setProvider] = useState<ChatProvider>('gemini')
   const [model, setModel] = useState('gemini-3.1-pro-preview')
   const [memoryEnabled, setMemoryEnabled] = useState(true)
@@ -114,19 +129,19 @@ export default function ChatPage() {
 
     return config.providers.map((item) => ({
       value: item.name as ChatProvider,
-      label: item.name.toUpperCase(),
+      label: PROVIDER_LABELS[item.name as ChatProvider] || item.name,
     }))
   }, [config])
 
   const activeModelOptions = useMemo(() => {
     if (!config) {
-      return DEFAULT_MODEL_OPTIONS
+      return DEFAULT_MODEL_OPTIONS[provider]
     }
 
     const selectedProvider = config.providers.find((item) => item.name === provider)
 
     if (!selectedProvider || selectedProvider.models.length === 0) {
-      return DEFAULT_MODEL_OPTIONS
+      return DEFAULT_MODEL_OPTIONS[provider]
     }
 
     return selectedProvider.models.map((item) => ({
@@ -141,8 +156,8 @@ export default function ChatPage() {
     }
 
     return config.agents.map((item) => ({
-      value: item.name,
-      label: item.description || item.name,
+      value: item.id,
+      label: item.name,
     }))
   }, [config])
 

@@ -11,6 +11,7 @@
     "start": "tsx ./src/app.ts",
     "start:broker": "tsx ./src/broker/app.ts",
     "build": "tsc --noEmit",
+    "test:runtime-canary": "tsx ./src/scripts/runtime-canary.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "seed": "tsx ./src/config/seed.ts"

@@ -1,5 +1,18 @@
 # Sandbox Broker Spec
 
+## Mục lục
+
+1. Mục tiêu
+2. Ranh giới tin cậy
+3. Kiến trúc runtime
+4. Cấu trúc thư mục storage và sandbox
+5. Luồng xử lý
+6. Giao thức broker
+7. Biện pháp hardening bắt buộc
+8. Triển khai Windows production
+9. Các biến môi trường mới
+10. Trạng thái implementation hiện tại
+
 ## 1. Mục tiêu
 
 Tách quá trình thực thi AI CLI ra khỏi backend chính để giảm rủi ro chatbot đọc mã nguồn, `.env`, cơ sở dữ liệu hoặc filesystem nội bộ ngoài phạm vi attachment được cấp phép.

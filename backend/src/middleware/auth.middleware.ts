@@ -16,3 +16,12 @@ export function requireAuth(request: Request, response: Response, next: NextFunc
     response.status(401).json({ message: 'Invalid or expired session' })
   }
 }
+
+export function requireAdmin(request: Request, response: Response, next: NextFunction) {
+  if (request.auth?.role !== 'ADMIN') {
+    response.status(403).json({ message: 'Admin access is required' })
+    return
+  }
+
+  next()
+}

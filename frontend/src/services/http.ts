@@ -36,3 +36,15 @@ export const documentEndpoints = {
   preview: (id: string) => `/api/documents/${id}/preview`,
   delete: (id: string) => `/api/documents/${id}`,
 }
+
+export const adminEndpoints = {
+  overview: '/api/admin/overview',
+  users: '/api/admin/users',
+  providers: '/api/admin/providers',
+  agents: '/api/admin/agents',
+  createAgent: '/api/admin/agents',
+  updateAgent: (agentId: string) => `/api/admin/agents/${agentId}`,
+  deleteAgent: (agentId: string) => `/api/admin/agents/${agentId}`,
+  config: '/api/admin/config',
+  logs: '/api/admin/logs',
+}

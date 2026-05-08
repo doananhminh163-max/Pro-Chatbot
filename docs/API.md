@@ -1,30 +1,31 @@
-# Tài liệu API
+# API documentation
 
-Tất cả endpoint backend hiện được mount dưới 3 namespace:
+## Mục lục
 
-- `/api/auth`
-- `/api/chat`
-- `/api/documents`
-
-Frontend gọi API qua Axios với `withCredentials: true`, nên cookie xác thực sẽ tự động được gửi kèm.
+1. Quy ước chung
+2. Auth API
+3. Chat API
+4. Documents API
+5. Admin API
+6. Những gì API chưa có
 
 ## 1. Quy ước chung
 
 ### Base URL
 
-- Mặc định backend: `http://localhost:8080`
-- Frontend có thể override bằng `VITE_API_BASE_URL`
+- mặc định backend: `http://localhost:8080`
+- frontend có thể override bằng `VITE_API_BASE_URL`
 
 ### Xác thực
 
-- Cookie JWT tên `access_token`
-- Loại cookie: `HttpOnly`
+- cookie JWT: `access_token`
+- `HttpOnly`
 - `sameSite: lax`
 - `secure: true` khi `NODE_ENV=production`
 
 ### Định dạng lỗi
 
-Phần lớn endpoint trả JSON dạng:
+Phần lớn endpoint trả:
 
 ```json
 {
@@ -32,37 +33,17 @@ Phần lớn endpoint trả JSON dạng:
 }
 ```
 
-Một số endpoint validate bằng `zod` sẽ trả thêm `errors`.
+Một số endpoint validate bằng `zod` có thể trả thêm `errors`.
 
 ## 2. Auth API
 
 ### `POST /api/auth/register`
 
-Tạo tài khoản mới và set cookie đăng nhập luôn.
-
-Request:
-
-```json
-{
-  "email": "user@example.com",
-  "password": "password123",
-  "username": "username",
-  "fullName": "Nguyen Van A"
-}
-```
+Tạo tài khoản mới và set cookie đăng nhập.
 
 ### `POST /api/auth/login`
 
 Đăng nhập bằng email hoặc username.
-
-Request:
-
-```json
-{
-  "emailOrUsername": "user@example.com",
-  "password": "password123"
-}
-```
 
 ### `POST /api/auth/logout`
 
@@ -70,55 +51,30 @@ Xóa cookie đăng nhập hiện tại.
 
 ### `GET /api/auth/me`
 
-Yêu cầu đã đăng nhập. Trả thông tin user hiện tại.
+Trả thông tin user hiện tại.
 
 ### `PATCH /api/auth/profile`
 
 Cập nhật hồ sơ và personalization.
 
-Request có thể chứa một hoặc nhiều trường:
+Trường thường dùng:
 
-```json
-{
-  "username": "new-username",
-  "fullName": "New Name",
-  "phone": "0123456789",
-  "avatar": "data:image/png;base64,...",
-  "aiTone": "professional",
-  "aiLanguage": "Vietnamese",
-  "aiResponseLength": "detailed",
-  "customInstructions": "Always answer in bullet points."
-}
-```
+- `username`
+- `fullName`
+- `phone`
+- `avatar`
+- `aiTone`
+- `aiLanguage`
+- `aiResponseLength`
+- `customInstructions`
 
 ### `POST /api/auth/forgot-password`
 
-Request:
-
-```json
-{
-  "emailOrUsername": "user@example.com"
-}
-```
-
-Response luôn là thông báo chung để tránh lộ tài khoản:
-
-```json
-{
-  "message": "If this account exists, a reset instruction has been issued."
-}
-```
+Gửi yêu cầu reset password.
 
 ### `POST /api/auth/reset-password`
 
-Request:
-
-```json
-{
-  "token": "reset-token-from-email",
-  "newPassword": "newStrongPassword"
-}
-```
+Đặt lại mật khẩu bằng token.
 
 ### `GET /api/auth/google`
 
@@ -126,7 +82,7 @@ Bắt đầu luồng Google OAuth.
 
 ### `GET /api/auth/google/callback`
 
-Passport callback. Thành công thì set cookie và redirect về frontend `/dashboard`.
+Passport callback, thành công thì set cookie và redirect về frontend.
 
 ## 3. Chat API
 
@@ -134,33 +90,11 @@ Tất cả endpoint chat yêu cầu đăng nhập.
 
 ### `GET /api/chat/config`
 
-Trả danh sách provider/model/agent lấy từ database.
+Trả danh sách provider / model / agent cho giao diện chat.
 
 ### `GET /api/chat/memory`
 
 Trả tổng quan memory của user hiện tại.
-
-Response:
-
-```json
-{
-  "overview": {
-    "globalMemories": [
-      {
-        "id": "memory-id",
-        "scope": "GLOBAL",
-        "kind": "PREFERENCE",
-        "title": "Preferred language",
-        "content": "User prefers Vietnamese unless explicitly requested otherwise.",
-        "importance": 85,
-        "sessionId": null,
-        "sessionTitle": null,
-        "lastUsedAt": "2026-04-26T08:12:10.000Z"
-      }
-    ]
-  }
-}
-```
 
 ### `DELETE /api/chat/memory/global`
 
@@ -168,31 +102,23 @@ Xóa toàn bộ global memory của user hiện tại.
 
 ### `GET /api/chat/sessions`
 
-Trả danh sách session của user hiện tại.
+Trả danh sách session của user.
 
 ### `DELETE /api/chat/sessions`
 
-Xóa toàn bộ session của user và xóa thư mục vật lý tương ứng.
+Xóa toàn bộ session của user.
 
 ### `GET /api/chat/sessions/:sessionId/messages`
 
-Tải chi tiết một session, gồm:
+Trả:
 
-- thông tin session;
-- danh sách message;
-- danh sách document của session.
+- thông tin session
+- danh sách message
+- danh sách document của session
 
 ### `PATCH /api/chat/sessions/:sessionId`
 
 Đổi tên session.
-
-Request:
-
-```json
-{
-  "title": "New title"
-}
-```
 
 ### `DELETE /api/chat/sessions/:sessionId`
 
@@ -200,9 +126,9 @@ Xóa một session.
 
 ### `POST /api/chat/messages`
 
-Gửi tin nhắn cho AI. Đây là endpoint quan trọng nhất của hệ thống.
+Gửi tin nhắn cho AI.
 
-Request:
+Request thường dùng:
 
 ```json
 {
@@ -216,17 +142,16 @@ Request:
 }
 ```
 
-Ghi chú:
+Ghi chú quan trọng:
 
-- `sessionId` có thể bỏ qua, backend sẽ tự tạo session mới.
+- `sessionId` có thể bỏ qua, backend sẽ tạo session mới.
 - `content` có thể rỗng nếu có file đính kèm; backend sẽ dùng mặc định `"Read and summarize the attachments."`.
-- `content` bị giới hạn `<= 2000` ký tự; nếu dài hơn, người dùng phải upload file `<= 20MB`.
-- `provider` hiện chấp nhận `gemini` và `opencode`.
-- `memoryEnabled` bật/tắt việc nạp `global memory` cho lượt chat hiện tại; mặc định là `true`.
-- Mỗi session chỉ chấp nhận tối đa `50` tin nhắn từ phía user. Nếu vượt ngưỡng, backend trả về `assistantMessage.sender = SYSTEM` với nội dung yêu cầu mở session mới.
-- Sau khi lưu phản hồi AI, backend sẽ chạy thêm một lượt extraction để cập nhật `global memory`.
+- prompt text bị giới hạn `<= 2000` ký tự.
+- mỗi session nhận tối đa `50` user messages.
+- backend có thể chạy thêm memory refresh sau khi có phản hồi AI.
+- runtime agent hiện tại đã bao gồm `systemPrompt`, skill instructions, và MCP settings nếu agent được chọn.
 
-Nếu CLI lỗi, `assistantMessage.sender` sẽ là `SYSTEM`.
+Nếu runtime/CLI lỗi, backend sẽ tạo `assistantMessage.sender = SYSTEM`.
 
 ## 4. Documents API
 
@@ -234,34 +159,25 @@ Tất cả endpoint document yêu cầu đăng nhập.
 
 ### `POST /api/documents/upload`
 
-Upload một file và extract ngay sang Markdown trước khi file đó có thể được dùng trong chat.
+Upload file và extract sang Markdown/OCR nếu file được hỗ trợ.
 
 Ghi chú:
 
-- Chỉ các loại file có extractor mới được chấp nhận cho luồng chat attachment.
-- Backend hiện extract `xlsx`, `csv`, `pdf`, `docx`, `image`, và text sang `Document.extractedText`.
-- Nếu extraction thất bại hoặc loại file không được hỗ trợ, upload trả lỗi `400`.
-- Mỗi file upload bị giới hạn `<= 20MB`.
-
-Upload một file.
-
-Request:
-
-- `multipart/form-data`
-- field file: `file`
-- field tùy chọn: `sessionId`
+- backend hiện extract `xlsx`, `csv`, `pdf`, `docx`, `image`, và text
+- file upload bị giới hạn `<= 20MB`
+- nếu extraction thất bại hoặc loại file không được hỗ trợ cho luồng chat attachment, backend trả lỗi `400`
 
 ### `GET /api/documents`
 
-Trả tất cả tài liệu của user. Mỗi document có thể include `session.title` nếu đã gắn vào session.
+Trả tất cả document của user.
 
 ### `DELETE /api/documents`
 
-Xóa toàn bộ tài liệu của user và cố gắng xóa file vật lý tương ứng.
+Xóa toàn bộ document của user.
 
 ### `GET /api/documents/:id/download`
 
-Tải file về dưới tên gốc `originalName`.
+Tải file về dưới tên gốc.
 
 ### `GET /api/documents/:id/preview`
 
@@ -271,10 +187,99 @@ Trả file trực tiếp để trình duyệt preview.
 
 Xóa một document.
 
-## 5. Những gì API chưa có
+## 5. Admin API
 
-- Chưa có endpoint admin CRUD.
-- Chưa có endpoint health check riêng ngoài `/`.
-- Chưa có endpoint stream chat theo token.
-- Chưa có endpoint search document/text extraction.
-- Chưa có endpoint logs/runtime metrics.
+Tất cả endpoint admin yêu cầu:
+
+- đã đăng nhập
+- có role `ADMIN`
+
+### `GET /api/admin/overview`
+
+Trả tổng quan:
+
+- `userCount`
+- `sessionCount`
+- `documentCount`
+- `agentCount`
+- `providerCount`
+- `failedExecutions`
+
+### `GET /api/admin/users`
+
+Trả danh sách user với:
+
+- role
+- session count
+- document count
+- memory count
+- storage bytes / storage label
+- last seen
+
+### `GET /api/admin/providers`
+
+Trả provider catalog và model inventory từ database.
+
+### `GET /api/admin/agents`
+
+Trả admin agent workspace:
+
+- `agents`
+- `skills`
+- `mcps`
+- `audit`
+
+### `POST /api/admin/agents`
+
+Tạo agent mới.
+
+Payload:
+
+```json
+{
+  "name": "report-strategist",
+  "description": "Optional description",
+  "systemPrompt": "Optional system prompt",
+  "selectedSkillIds": ["skill-id"],
+  "selectedMcpToolIds": ["mcp-id"]
+}
+```
+
+### `PATCH /api/admin/agents/:agentId`
+
+Cập nhật agent hiện có.
+
+### `DELETE /api/admin/agents/:agentId`
+
+Xóa agent. Session cũ sẽ bị detach khỏi profile này qua quan hệ `agentId` nullable.
+
+### `GET /api/admin/config`
+
+Trả runtime config read-only:
+
+- Gemini CLI command
+- OpenCode CLI command
+- sandbox root / broker URL / TTL / timeout
+- user docs root
+
+### `GET /api/admin/logs`
+
+Trả system logs gần đây được suy ra từ `Message` có `sender = SYSTEM`.
+
+Mỗi bản ghi gồm:
+
+- `createdAt`
+- `level`
+- `message`
+- `sessionId`
+- `sessionTitle`
+- `userEmail`
+- `agentName`
+
+## 6. Những gì API chưa có
+
+- chưa có health check riêng ngoài `/`
+- chưa có token streaming API thật
+- chưa có document search/full-text API riêng
+- `Users`, `Providers`, `Config`, `Logs` trong admin chưa có write endpoints đầy đủ
+

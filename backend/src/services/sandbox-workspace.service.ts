@@ -3,6 +3,12 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { env } from '../config/env.js'
 import { getSandboxSessionDir } from './document-storage.service.js'
+import {
+  ensureSandboxPolicyFiles,
+  type SandboxAgentInstructions,
+  type SandboxUserPolicyPreferences,
+} from './sandbox-policy.service.js'
+import { ensureOpenCodeRuntime } from './opencode-runtime.service.js'
 import type { ChatProvider } from './chat.types.js'
 
 interface SandboxAttachmentInput {
@@ -19,12 +25,18 @@ interface PrepareSandboxJobInput {
   provider: ChatProvider
   prompt: string
   model?: string
+  internalProcessing?: boolean
+  preferences?: SandboxUserPolicyPreferences
+  agentInstructions?: SandboxAgentInstructions
   attachments: SandboxAttachmentInput[]
 }
 
 export interface PreparedSandboxJob {
   workspaceDir: string
   contextFilePath: string | null
+  agentsPath: string
+  userRulesPath: string
+  securityPolicyPath: string
 }
 
 function ensureDirectory(targetPath: string) {
@@ -125,6 +137,17 @@ export async function prepareSandboxJob(input: PrepareSandboxJobInput): Promise<
 
   const workspaceDir = getSandboxWorkspaceDir(input.userId, input.sessionId)
   ensureDirectory(workspaceDir)
+  const policyFiles = await ensureSandboxPolicyFiles({
+    userId: input.userId,
+    workspaceDir,
+    internalProcessing: input.internalProcessing,
+    preferences: input.preferences,
+    agentInstructions: input.agentInstructions,
+  })
+
+  if (input.provider === 'opencode') {
+    await ensureOpenCodeRuntime(input.userId, input.sessionId, input.agentInstructions?.opencodeMcpSettings)
+  }
 
   const sections = await Promise.all(
     input.attachments.map(async (attachment) => {
@@ -173,5 +196,8 @@ export async function prepareSandboxJob(input: PrepareSandboxJobInput): Promise<
   return {
     workspaceDir,
     contextFilePath,
+    agentsPath: policyFiles.agentsPath,
+    userRulesPath: policyFiles.userRulesPath,
+    securityPolicyPath: policyFiles.securityPolicyPath,
   }
 }

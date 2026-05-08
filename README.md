@@ -49,7 +49,7 @@ report_analizing/
 ├── backend/                # API server, Prisma schema, seed, services
 ├── frontend/               # SPA React + Vite
 ├── docs/                   # Tài liệu dự án
-├── GEMINI.md               # Ngữ cảnh làm việc cũ cho AI agent
+├── AGENTS.md               # Ngữ cảnh hướng dẫn tổng hợp cho AI agent
 ├── package.json            # Scripts chạy toàn dự án
 └── README.md               # Tài liệu vào cửa của dự án
 ```

@@ -33,7 +33,7 @@ export const env = {
   smtpFrom: getEnv('SMTP_FROM', getEnv('SMTP_USER')),
   appName: getEnv('APP_NAME', 'Pro Chatbot'),
   geminiCliCommand: getEnv('GEMINI_CLI_COMMAND', 'gemini --model={model}'),
-  opencodeCliCommand: getEnv('OPENCODE_CLI_COMMAND', 'opencode --model={model}'),
+  opencodeCliCommand: getEnv('OPENCODE_CLI_COMMAND', 'opencode run --model={model}'),
   cliTimeoutMs: Number(getEnv('CLI_TIMEOUT_MS', '0')),
   userDocsRoot: getEnv('USER_DOCS_ROOT', 'D:\\Projects\\user_docs\\store'),
   sandboxBrokerUrl: getEnv('SANDBOX_BROKER_URL', 'http://127.0.0.1:8091'),

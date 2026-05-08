@@ -1,14 +1,24 @@
-# Thiết kế cơ sở dữ liệu
+# Database design
 
-Tài liệu này mô tả schema hiện tại trong `backend/prisma/schema.prisma`. Hệ thống dùng SQLite và Prisma ORM. Các model được tối ưu cho một ứng dụng chat nội bộ chạy cục bộ, nên dữ liệu nhấn mạnh vào session, tài liệu và cấu hình AI hơn là các báo cáo phân tích phức tạp.
+## Mục lục
+
+1. Công nghệ và nguyên tắc
+2. Enum
+3. Model chính
+4. Dữ liệu agent nằm ngoài schema
+5. Runtime agent hiện tại
+6. Admin data và admin API
+7. Quan hệ dữ liệu chính
+8. Hành vi `onDelete`
+9. Seed data
 
 ## 1. Công nghệ và nguyên tắc
 
 - Database engine: SQLite
 - ORM: Prisma
 - Định danh chính: UUID string
-- Timestamp: đã có cho các model hội thoại/memory (`ChatSession`, `Message`, `MemoryEntry`)
-- File binary: không lưu trong database, chỉ lưu metadata và `filePath`
+- File binary không lưu trong database; chỉ lưu metadata và `filePath`
+- Skill và MCP không nằm trong schema Prisma
 
 ## 2. Enum
 
@@ -28,7 +38,7 @@ Tài liệu này mô tả schema hiện tại trong `backend/prisma/schema.prism
 - `GLOBAL`
 - `SESSION`
 
-Ghi chú: runtime hiện tại chỉ dùng `GLOBAL`; `SESSION` còn tồn tại trong schema vì lý do tương thích dữ liệu cũ.
+Ghi chú: runtime hiện tại chỉ dùng `GLOBAL`; `SESSION` được giữ lại để tương thích dữ liệu cũ.
 
 ### `MemoryKind`
 
@@ -38,73 +48,70 @@ Ghi chú: runtime hiện tại chỉ dùng `GLOBAL`; `SESSION` còn tồn tại 
 - `DOMAIN`
 - `FACT`
 
-## 3. Mô tả từng model
+## 3. Model chính
 
-### 3.1 `User`
+### `User`
 
-Lưu thông tin tài khoản và cấu hình cá nhân hóa AI.
+Lưu thông tin tài khoản và personalization.
 
-| Trường | Kiểu | Ghi chú |
-| :--- | :--- | :--- |
-| `id` | `String` | PK, UUID |
-| `username` | `String?` | unique, có thể null |
-| `email` | `String` | unique |
-| `passwordHash` | `String` | mật khẩu đã băm |
-| `fullName` | `String?` | tên hiển thị |
-| `avatar` | `String?` | hiện lưu dưới dạng chuỗi, frontend có thể gửi base64 |
-| `phone` | `String?` | số điện thoại |
-| `resetPasswordToken` | `String?` | token reset đã hash |
-| `resetPasswordExpiresAt` | `DateTime?` | thời điểm hết hạn |
-| `role` | `Role` | mặc định `CLIENT` |
-| `aiTone` | `String?` | mặc định `professional` |
-| `aiLanguage` | `String?` | mặc định `Vietnamese` |
-| `aiResponseLength` | `String?` | mặc định `balanced` |
-| `customInstructions` | `String?` | chỉ dẫn cố định cho AI |
+Trường nổi bật:
+
+- `id`
+- `username`
+- `email`
+- `passwordHash`
+- `fullName`
+- `avatar`
+- `phone`
+- `role`
+- `aiTone`
+- `aiLanguage`
+- `aiResponseLength`
+- `customInstructions`
 
 Quan hệ:
 
-- `documents`: 1 user có nhiều document
-- `sessions`: 1 user có nhiều session
-- `memories`: 1 user có nhiều memory entry
+- 1 user có nhiều `Document`
+- 1 user có nhiều `ChatSession`
+- 1 user có nhiều `MemoryEntry`
 
-### 3.2 `Document`
+### `Document`
 
-Lưu metadata của file người dùng.
+Lưu metadata file của user.
 
-| Trường | Kiểu | Ghi chú |
-| :--- | :--- | :--- |
-| `id` | `String` | PK, UUID |
-| `userId` | `String` | FK tới `User` |
-| `sessionId` | `String?` | FK tới `ChatSession`, nullable |
-| `messageId` | `String?` | FK tới `Message`, nullable |
-| `fileName` | `String` | tên file vật lý trên đĩa |
-| `originalName` | `String` | tên file gốc khi upload |
-| `filePath` | `String` | đường dẫn tuyệt đối/logic tới file |
-| `mimeType` | `String` | kiểu MIME |
-| `size` | `Int` | kích thước bytes |
-| `extractedText` | `String?` | Markdown extract đã parse/OCR từ file, dùng để tạo artifact gửi vào sandbox |
+Trường nổi bật:
 
-Quan hệ:
+- `id`
+- `userId`
+- `sessionId`
+- `messageId`
+- `fileName`
+- `originalName`
+- `filePath`
+- `mimeType`
+- `size`
+- `extractedText`
 
-- thuộc về đúng 1 `User`
-- có thể thuộc 1 `ChatSession`
-- có thể gắn với 1 `Message`
+Ghi chú:
 
-### 3.3 `ChatSession`
+- `extractedText` được populate ngay lúc upload nếu file có extractor.
+- Backend dùng nội dung này để tạo artifact Markdown cho sandbox job.
+
+### `ChatSession`
 
 Đại diện cho một cuộc hội thoại độc lập.
 
-| Trường | Kiểu | Ghi chú |
-| :--- | :--- | :--- |
-| `id` | `String` | PK, UUID |
-| `userId` | `String` | chủ sở hữu session |
-| `agentId` | `String?` | agent được chọn cho session |
-| `title` | `String` | tiêu đề session |
-| `summary` | `String?` | trường legacy, hiện không còn được runtime chat cập nhật |
-| `activeTask` | `String?` | trường legacy, hiện không còn được runtime chat cập nhật |
-| `memoryUpdatedAt` | `DateTime?` | lần cập nhật memory gần nhất |
-| `createdAt` | `DateTime` | thời điểm tạo |
-| `updatedAt` | `DateTime` | thời điểm cập nhật cuối |
+Trường nổi bật:
+
+- `id`
+- `userId`
+- `agentId`
+- `title`
+- `summary` (legacy)
+- `activeTask` (legacy)
+- `memoryUpdatedAt`
+- `createdAt`
+- `updatedAt`
 
 Quan hệ:
 
@@ -112,156 +119,166 @@ Quan hệ:
 - có thể tham chiếu 1 `Agent`
 - có nhiều `Message`
 - có nhiều `Document`
-- có thể còn tham chiếu `MemoryEntry` scope `SESSION` từ dữ liệu cũ, nhưng runtime hiện tại không còn sử dụng
 
-### 3.4 `Message`
+### `Message`
 
 Đại diện cho từng lượt trao đổi trong session.
 
-| Trường | Kiểu | Ghi chú |
-| :--- | :--- | :--- |
-| `id` | `String` | PK, UUID |
-| `sessionId` | `String` | FK tới `ChatSession` |
-| `sender` | `SenderType` | USER / AI / SYSTEM |
-| `content` | `String` | nội dung message |
-| `createdAt` | `DateTime` | thời điểm tạo |
+Trường nổi bật:
+
+- `id`
+- `sessionId`
+- `sender`
+- `content`
+- `createdAt`
+
+### `MemoryEntry`
+
+Lưu memory để phục vụ runtime prompt.
+
+Trường nổi bật:
+
+- `id`
+- `userId`
+- `sessionId`
+- `scope`
+- `kind`
+- `title`
+- `content`
+- `importance`
+- `createdAt`
+- `updatedAt`
+- `lastUsedAt`
+
+Ghi chú:
+
+- Runtime hiện tại nạp `GLOBAL` memory cho prompt khi `memoryEnabled=true`.
+- `SESSION` tồn tại chủ yếu để tương thích dữ liệu cũ.
+
+### `Provider`
+
+Metadata cho nhà cung cấp AI.
+
+Trường nổi bật:
+
+- `id`
+- `name`
+- `config`
+
+### `Model`
+
+Metadata cho model thuộc một provider.
+
+Trường nổi bật:
+
+- `id`
+- `providerId`
+- `name`
+
+### `Agent`
+
+Profile xử lý mà user/admin có thể chọn.
+
+Trường nổi bật:
+
+- `id`
+- `name`
+- `description`
+- `systemPrompt`
 
 Quan hệ:
 
-- thuộc 1 `ChatSession`
-- có thể gắn nhiều `Document`
+- 1 agent có nhiều `ChatSession`
 
-### 3.5 `MemoryEntry`
+## 4. Dữ liệu agent nằm ngoài schema
 
-Lưu ngữ cảnh memory phục vụ prompt. Runtime hiện tại chỉ nạp `GLOBAL` memory cho prompt; `SESSION` được giữ lại trong schema để tương thích ngược.
+Prisma chỉ lưu metadata cơ bản của agent trong bảng `Agent`.
 
-| Trường | Kiểu | Ghi chú |
-| :--- | :--- | :--- |
-| `id` | `String` | PK, UUID |
-| `userId` | `String` | FK tới `User` |
-| `sessionId` | `String?` | FK tới `ChatSession`, chủ yếu phục vụ dữ liệu legacy scope `SESSION` |
-| `scope` | `MemoryScope` | hiện runtime dùng `GLOBAL`; `SESSION` là legacy |
-| `kind` | `MemoryKind` | loại memory (`FACT`, `TASK`, ...) |
-| `title` | `String` | tiêu đề memory (dùng để upsert) |
-| `content` | `String` | nội dung memory |
-| `importance` | `Int` | độ ưu tiên 1-100, mặc định 50 |
-| `createdAt` | `DateTime` | thời điểm tạo |
-| `updatedAt` | `DateTime` | thời điểm cập nhật |
-| `lastUsedAt` | `DateTime` | lần được dùng gần nhất trong prompt |
+Những phần sau được lưu/resolve ngoài schema:
 
-Quan hệ:
+- `selectedSkillIds`
+- `selectedMcpToolIds`
+- audit history cho agent
+- nội dung skill instructions
+- Gemini/OpenCode MCP settings cho runtime
 
-- thuộc 1 `User`
-- có thể thuộc 1 `ChatSession` với dữ liệu legacy theo phiên
+Backend đọc các phần này qua:
 
-Index quan trọng:
+- `agent-config-store.service.ts`
+- `agent-audit-store.service.ts`
+- `admin-catalog.service.ts`
 
-- `@@index([userId, scope, lastUsedAt])`
-- `@@index([sessionId, scope, lastUsedAt])`
+## 5. Runtime agent hiện tại
 
-### 3.6 `Provider`
+Ghi chú cũ trong codebase về `Agent.systemPrompt` không còn đúng nữa.
 
-Đại diện cho một nhà cung cấp AI.
+Trạng thái hiện tại:
 
-| Trường | Kiểu | Ghi chú |
-| :--- | :--- | :--- |
-| `id` | `String` | PK |
-| `name` | `String` | unique |
-| `config` | `String?` | JSON string cấu hình nếu cần |
+- `chat.service.ts` gọi `resolveAgentRuntime(input.agent)`
+- `resolveAgentRuntime()` trả về:
+  - `systemPrompt`
+  - skill instructions đã chọn
+  - MCP catalog đã chọn
+  - `geminiMcpSettings`
+  - `opencodeMcpSettings`
+- `systemPrompt` được đưa vào prompt tạo bởi `createCliPrompt()`
+- thông tin skill/MCP được đưa tiếp vào sandbox/runtime preparation
 
-Quan hệ:
+Nói ngắn gọn: `Agent.systemPrompt` đã được nối vào runtime chat thật.
 
-- 1 provider có nhiều `Model`
+## 6. Admin data và admin API
 
-### 3.7 `Model`
+Admin không còn chỉ là UI mock.
 
-Đại diện cho model cụ thể thuộc một provider.
+Backend đã có các nhóm API thật:
 
-| Trường | Kiểu | Ghi chú |
-| :--- | :--- | :--- |
-| `id` | `String` | PK |
-| `providerId` | `String` | FK tới `Provider` |
-| `name` | `String` | tên model |
+- `overview`
+- `users`
+- `providers`
+- `agents`
+- `config`
+- `logs`
 
-### 3.8 `Agent`
+Trạng thái hiện tại:
 
-Đại diện cho một persona hoặc profile xử lý mà người dùng chọn trong màn chat.
+- `Agents` đã có CRUD thật
+- `Users`, `Providers`, `Config`, `Logs` hiện chủ yếu là read-only views trên dữ liệu thật
 
-| Trường | Kiểu | Ghi chú |
-| :--- | :--- | :--- |
-| `id` | `String` | PK |
-| `name` | `String` | unique |
-| `description` | `String?` | mô tả ngắn |
-| `systemPrompt` | `String?` | chỗ cho prompt hệ thống riêng, hiện chưa dùng trong `chat.service.ts` |
-
-Quan hệ:
-
-- có nhiều `ChatSession`
-
-## 4. Quan hệ dữ liệu chính
+## 7. Quan hệ dữ liệu chính
 
 ```text
 User
- ├── ChatSession
- │    ├── Message
- │    │    └── Document
- │    ├── MemoryEntry (SESSION)
- │    └── Document
- ├── MemoryEntry (GLOBAL)
- └── Document
+ |- ChatSession
+ |  |- Message
+ |  |  \- Document
+ |  \- Document
+ |- MemoryEntry (GLOBAL / legacy SESSION)
+ \- Document
 
 Provider
- └── Model
+ \- Model
 
 Agent
- └── ChatSession
+ \- ChatSession
 ```
 
-## 5. Hành vi `onDelete`
+## 8. Hành vi `onDelete`
 
-- Xóa `User` sẽ cascade xuống `Document` và `ChatSession`.
-- Xóa `ChatSession` sẽ cascade xuống `Message` và `MemoryEntry` của session.
-- Xóa `User` cũng cascade xuống `MemoryEntry`.
-- `Document.sessionId` dùng `onDelete: SetNull`.
-- `Document.messageId` dùng `onDelete: SetNull`.
-- `ChatSession.agentId` dùng `onDelete: SetNull`.
+- Xóa `User` cascade xuống `Document`, `ChatSession`, `MemoryEntry`
+- Xóa `ChatSession` cascade xuống `Message`
+- `Document.sessionId`: `onDelete: SetNull`
+- `Document.messageId`: `onDelete: SetNull`
+- `ChatSession.agentId`: `onDelete: SetNull`
 
-Điều này phù hợp với mục tiêu: session có thể bị xóa mà không làm hỏng integrity của document metadata trong một số trường hợp trung gian.
+## 9. Seed data
 
-## 6. Những điểm đáng chú ý trong thiết kế hiện tại
+Seed hiện tại tạo:
 
-### Timestamp trong schema hiện tại
-
-Các thực thể chat/memory đã có timestamp để theo dõi vòng đời dữ liệu:
-
-- `ChatSession`: `createdAt`, `updatedAt`, `memoryUpdatedAt`
-- `Message`: `createdAt`
-- `MemoryEntry`: `createdAt`, `updatedAt`, `lastUsedAt`
-
-Các model khác (ví dụ `User`, `Document`) hiện chưa có đầy đủ cặp `createdAt/updatedAt`.
-
-### `Document.extractedText`
-
-Trường này hiện được populate ngay lúc upload. Backend parse/OCR file và lưu Markdown extract vào đây để bước sandbox chỉ cần ghi lại các file `.md` tương ứng trước khi gọi CLI.
-
-### `Agent.systemPrompt` chưa được nối vào prompt thật
-
-Trong `chat.service.ts`, prompt hiện được dựng từ `agent` name + personalization + history. `systemPrompt` trong database chưa được đưa vào.
-
-### Dữ liệu admin mới là hạ tầng chờ sẵn
-
-Schema hiện giữ `Provider`, `Model`, `Agent` làm metadata cấu hình tối thiểu. Frontend admin vẫn là mock UI, chưa có API CRUD tương ứng.
-
-Skill và MCP không còn nằm trong schema Prisma. Chúng được quản lý ngoài project ở `C:\Users\Admin\.agents`.
-
-## 7. Dữ liệu seed mặc định
-
-Script seed hiện tạo:
-
-- 1 provider: `gemini`
+- provider `gemini`
 - nhiều model Gemini
 - 3 agent mẫu
 
 Không seed:
 
 - user/admin mặc định
+

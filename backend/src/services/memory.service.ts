@@ -267,6 +267,7 @@ async function runMemoryExtractionPrompt(input: {
     provider: input.provider,
     prompt: input.prompt,
     model: input.model,
+    internalProcessing: true,
     attachments: [],
   })
 

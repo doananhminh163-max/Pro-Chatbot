@@ -6,8 +6,15 @@ export async function getChatConfig() {
       include: {
         models: true,
       },
+      orderBy: {
+        name: 'asc',
+      },
     }),
-    prisma.agent.findMany(),
+    prisma.agent.findMany({
+      orderBy: {
+        name: 'asc',
+      },
+    }),
   ])
 
   return {
@@ -24,6 +31,7 @@ export async function getChatConfig() {
       id: a.id,
       name: a.name,
       description: a.description,
+      systemPrompt: a.systemPrompt,
     })),
   }
 }

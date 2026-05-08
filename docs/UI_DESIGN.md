@@ -1,5 +1,17 @@
 # Thiết kế UI và trạng thái màn hình
 
+## Mục lục
+
+1. Nguyên tắc giao diện
+2. Cấu trúc điều hướng
+3. Màn hình public
+4. Màn hình client
+5. Màn hình admin
+6. Motion và phản hồi trạng thái
+7. Đánh giá mức độ hoàn thiện frontend
+8. Cập nhật giao diện và tối ưu chat
+9. Cập nhật hiện trạng admin
+
 Tài liệu này mô tả giao diện hiện tại của frontend theo đúng trạng thái triển khai thật, không chỉ theo ý tưởng thiết kế.
 
 ## 1. Nguyên tắc giao diện
@@ -255,24 +267,49 @@ Nhìn chung, giao diện chat đã được chăm chút tốt hơn phần còn l
 - chuẩn hóa ngôn ngữ hiển thị;
 - tối ưu các hành vi quick action.
 
-## 8. Cap nhat giao dien va toi uu chat
+## 8. Cập nhật giao diện và tối ưu chat
 
 ### Chatbot
 
-- `ChatPage` da duoc tach thanh cac khoi rieng cho message stream, composer va config panel.
-- luong render message duoc co lap khoi o nhap lieu de giam rerender khi nguoi dung dang go prompt;
-- lich su hoi thoai duoc ap dung `startTransition` khi tai lai session lon;
-- markdown message duoc parse theo tung message va memo hoa o component rieng;
-- message row co `content-visibility` de giam chi phi paint voi session dai.
+- `ChatPage` đã được tách thành các khối riêng cho message stream, composer và config panel.
+- luồng render message được cô lập khỏi ô nhập liệu để giảm rerender khi người dùng đang gõ prompt;
+- lịch sử hội thoại được áp dụng `startTransition` khi tải lại session lớn;
+- markdown message được parse theo từng message và memo hóa ở component riêng;
+- message row có `content-visibility` để giảm chi phí paint với session dài.
 
 ### Admin side
 
-- `AdminLayout` va `WorkspaceLayout` da doi sang huong "operations control room";
-- sidebar co branding, telemetry block va status chip rieng cho khu admin;
-- cac trang CRUD admin duoc nang cap voi summary cards, search/filter toolbar va insight rail;
-- `Config` va `Logs` da dung chung visual language moi de tranh lech tong giao dien.
+- `AdminLayout` và `WorkspaceLayout` đã đổi sang hướng "operations control room";
+- sidebar có branding, telemetry block và status chip riêng cho khu admin;
+- các trang CRUD admin được nâng cấp với summary cards, search/filter toolbar và insight rail;
+- `Config` và `Logs` đã dùng chung visual language mới để tránh lệch tông giao diện.
 
-### Ghi chu
+### Ghi chú
 
-- du lieu admin van la mock data, thay doi nay tap trung vao shell, kha nang doc trang thai va kha nang mo rong cho CRUD that;
-- tai lieu nay can tiep tuc cap nhat khi admin duoc noi backend that cho Users, Agents, Providers, Logs va CLI policy.
+- dữ liệu admin vẫn là mock data, thay đổi này tập trung vào shell, khả năng đọc trạng thái và khả năng mở rộng cho CRUD thật;
+- tài liệu này cần tiếp tục cập nhật khi admin được nối backend thật cho Users, Agents, Providers, Logs và CLI policy.
+
+## 9. Cập nhật hiện trạng admin
+
+Phần mô tả admin ở các mục bên trên đã chậm hơn implementation hiện tại. Trạng thái đúng theo codebase bây giờ là:
+
+### Admin Console
+
+- `UsersPage` đã đọc dữ liệu thật từ backend qua `fetchAdminOverview()` và `fetchAdminUsers()`, nhưng vẫn là read-only.
+- `ProvidersPage` đã đọc provider/model inventory thật từ backend qua `fetchAdminProviders()`, nhưng chưa có CRUD.
+- `ConfigPage` đã đọc cấu hình runtime thật từ backend qua `fetchAdminConfig()`, và có chủ đích read-only.
+- `LogsPage` đã đọc log hệ thống thật từ backend qua `fetchAdminLogs()`, có filter theo session/user/agent/nội dung.
+- `AgentsPage` đã nối backend thật qua `GET/POST/PATCH/DELETE /api/admin/agents`.
+
+### Agents Page
+
+- giao diện hiện tại ưu tiên "compact first" thay vì phơi toàn bộ thông tin ngay khi mở trang.
+- người dùng chọn agent bằng dropdown `Agent profile`.
+- có nút `Show Detail` / `Hide Detail` để bật tắt toàn bộ phần chi tiết.
+- có nút `Update` để lưu thay đổi cho profile hiện tại; khi tạo mới thì nút đổi thành `Create Agent`.
+- prompt, skills, MCP surface, bundle manifest và audit timeline đều nằm trong `Accordion` / `Collapse`.
+- catalog skill/MCP đọc từ backend workspace thật và cho phép bật/tắt từng mục ngay trong editor.
+
+### Ghi chú doc này
+
+- nếu có xung đột giữa mục 5/8 ở trên và implementation hiện tại, ưu tiên thông tin trong mục 9 này.

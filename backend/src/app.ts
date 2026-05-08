@@ -7,6 +7,7 @@ import passport from './config/passport.js'
 import { env } from './config/env.js'
 import { ensureStorageDirectories, validateStorageConfiguration } from './config/storage.js'
 import authRouter from './routes/auth.routes.js'
+import adminRouter from './routes/admin.routes.js'
 import chatRouter from './routes/chat.routes.js'
 import documentRouter from './routes/document.routes.js'
 
@@ -32,6 +33,7 @@ app.get('/', (_request, response) => {
 })
 
 app.use('/api/auth', authRouter)
+app.use('/api/admin', adminRouter)
 app.use('/api/chat', chatRouter)
 app.use('/api/documents', documentRouter)
 

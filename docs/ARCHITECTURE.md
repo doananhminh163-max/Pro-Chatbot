@@ -1,5 +1,17 @@
 # Kiến trúc hệ thống
 
+## Mục lục
+
+1. Tổng quan kiến trúc
+2. Kiến trúc frontend
+3. Kiến trúc backend
+4. Luồng xác thực
+5. Luồng quản lý tài liệu
+6. Luồng chat và thực thi AI
+7. Luồng đồng bộ file với session
+8. Dữ liệu và cấu hình
+9. Những gì kiến trúc chưa có
+
 ## 1. Tổng quan kiến trúc
 
 Hệ thống gồm 4 lớp chính:

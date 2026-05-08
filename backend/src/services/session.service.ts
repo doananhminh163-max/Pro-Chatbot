@@ -19,7 +19,7 @@ export function buildSessionTitle(content: string) {
   return `${normalized.slice(0, 67)}...`
 }
 
-export async function resolveSession(userId: string, sessionId?: string, seedContent?: string) {
+export async function resolveSession(userId: string, sessionId?: string, seedContent?: string, agentId?: string | null) {
   if (sessionId) {
     const existing = await prisma.chatSession.findFirst({
       where: {
@@ -32,12 +32,24 @@ export async function resolveSession(userId: string, sessionId?: string, seedCon
       throw new Error('Session not found')
     }
 
+    if (agentId !== undefined && existing.agentId !== agentId) {
+      return prisma.chatSession.update({
+        where: {
+          id: existing.id,
+        },
+        data: {
+          agentId,
+        },
+      })
+    }
+
     return existing
   }
 
   return prisma.chatSession.create({
     data: {
       userId,
+      agentId: agentId || null,
       title: buildSessionTitle(seedContent || ''),
     },
   })

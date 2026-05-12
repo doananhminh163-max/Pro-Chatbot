@@ -1,42 +1,61 @@
-import express from 'express'
-import dotenv from 'dotenv'
-import cors from 'cors'
-import cookieParser from 'cookie-parser'
-import helmet from 'helmet'
-import passport from './config/passport.js'
-import { env } from './config/env.js'
-import { ensureStorageDirectories, validateStorageConfiguration } from './config/storage.js'
-import authRouter from './routes/auth.routes.js'
-import adminRouter from './routes/admin.routes.js'
-import chatRouter from './routes/chat.routes.js'
-import documentRouter from './routes/document.routes.js'
+import express from "express";
+import 'dotenv/config'
+import activateWebRoutes from "routes/web.js";
+import initDatabase from "config/seed.js";
+import passport from "passport";
+import session from "express-session";
+import configPassport from "middleware/passport.local.js";
+import { PrismaSessionStore } from "@quixo3/prisma-session-store";
+import { prisma } from "config/prisma.config.js";
 
-dotenv.config()
-validateStorageConfiguration()
-ensureStorageDirectories()
+const app = express();
+const PORT = process.env.PORT;
 
-const app = express()
+// config view engine
+app.set('view engine', 'ejs');
+app.set('views', './src/views')
 
-app.use(
-  cors({
-    origin: env.frontendUrl,
-    credentials: true,
-  }),
-)
-app.use(helmet())
-app.use(cookieParser())
-app.use(express.json())
-app.use(passport.initialize())
+// config body parser
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-app.get('/', (_request, response) => {
-  response.send('Pro Chatbot API is running...')
-})
+// config static files
+app.use(express.static('public'));
 
-app.use('/api/auth', authRouter)
-app.use('/api/admin', adminRouter)
-app.use('/api/chat', chatRouter)
-app.use('/api/documents', documentRouter)
+//config session
+app.use(session({
+    cookie: {
+        maxAge: 1000 * 60 * 60 * 24 * 7
+    },
+    secret: "hello world",
+    resave: true,
+    saveUninitialized: true,
+    store: new PrismaSessionStore(
+        prisma,
+        {
+            checkPeriod: 2 * 60 * 1000,
+            dbRecordIdIsSessionId: true,
+            dbRecordIdFunction: undefined,
+        }
+    )
+}));
 
-app.listen(env.port, () => {
-  console.log(`[server]: Server is running at http://localhost:${env.port}`)
-})
+// config passport
+configPassport();
+app.use(passport.initialize());
+app.use(passport.session());
+
+// config user session
+app.use(async (req, res, next) => {
+    res.locals.user = req.user;
+    next();
+});
+
+// init database
+initDatabase()
+
+activateWebRoutes(app);
+
+const server = app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+});

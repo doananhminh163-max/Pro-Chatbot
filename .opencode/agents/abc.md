@@ -1,8 +1,10 @@
 ---
 name: abc
-description: xyzd
+description: abc
 mode: primary
 model: github-copilot/gpt-5.2
+temperature: 0.5
+steps: 5
 disable: false
 permission:
   read: allow

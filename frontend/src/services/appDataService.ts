@@ -1,4 +1,4 @@
-import type { AgentDetail, AppState, ChatContextReference, ChatFileReference, ChatResponse, ChatSession, ChatSessionDetail, ChatSessionExport, ChatStreamEvent, ChatSubmitOptions, CommandItem, ConfigChange, ConfigIntent, ExternalSkillFindResult, GlobalSkillInstallResult, McpInstallResult, McpMarketplaceItem, McpRuntimeCheck, PermissionResponse, ProjectPathReference, SkillDetail, SnapshotReviewClearResult, WorkingTreeBackupResult, WorkingTreeReview } from '../types/appData'
+import type { AgentDetail, AppState, CommandItem, ConfigChange, ExternalSkillFindResult, GlobalSkillInstallResult, McpInstallResult, McpMarketplaceItem, McpRuntimeCheck, ProjectPathReference, SkillDetail, SnapshotReviewClearResult, WorkingTreeBackupResult, WorkingTreeReview } from '../types/appData'
 import { readApiResponse, type ApiResponse } from './apiResponse'
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? ''
@@ -33,90 +33,6 @@ function patchJson<T>(path: string, body: unknown) {
     method: 'PATCH',
     body: JSON.stringify(body),
   })
-}
-
-function deleteJson<T>(path: string) {
-  return apiRequest<T>(path, {
-    method: 'DELETE',
-  })
-}
-
-function parseStreamEvent(block: string): ChatStreamEvent | null {
-  const data = block
-    .split('\n')
-    .filter((line) => line.startsWith('data:'))
-    .map((line) => line.slice(5).trimStart())
-    .join('\n')
-    .trim()
-
-  if (!data || data === '[DONE]') return null
-  return JSON.parse(data) as ChatStreamEvent
-}
-
-function isAbortError(error: unknown) {
-  return error instanceof Error && error.name === 'AbortError'
-}
-
-async function readChatStream(response: Response, onEvent?: (event: ChatStreamEvent) => void, signal?: AbortSignal) {
-  const reader = response.body?.getReader()
-  if (!reader) {
-    throw new Error('Streaming is not supported by this browser.')
-  }
-
-  const decoder = new TextDecoder()
-  let buffer = ''
-  let finalResponse: ChatResponse | null = null
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read()
-      buffer += decoder.decode(value, { stream: !done }).replace(/\r\n/g, '\n')
-
-      let separatorIndex = buffer.indexOf('\n\n')
-      while (separatorIndex !== -1) {
-        const event = parseStreamEvent(buffer.slice(0, separatorIndex))
-        buffer = buffer.slice(separatorIndex + 2)
-        if (event) {
-          if (event.type === 'error') {
-            throw new Error(event.error?.message ?? 'OpenCode chat stream failed')
-          }
-          onEvent?.(event)
-          if (event.type === 'done') {
-            finalResponse = event.response
-          }
-        }
-        separatorIndex = buffer.indexOf('\n\n')
-      }
-
-      if (done) {
-        const event = parseStreamEvent(buffer)
-        if (event) {
-          if (event.type === 'error') {
-            throw new Error(event.error?.message ?? 'OpenCode chat stream failed')
-          }
-          onEvent?.(event)
-          if (event.type === 'done') {
-            finalResponse = event.response
-          }
-        }
-        break
-      }
-    }
-  } finally {
-    reader.releaseLock()
-  }
-
-  if (!finalResponse) {
-    if (signal?.aborted) {
-      throw new DOMException('Chat stream aborted', 'AbortError')
-    }
-    throw new Error('OpenCode chat stream closed before completion.')
-  }
-  return finalResponse
-}
-
-export function createConfigIntent(message: string, projectId: string) {
-  return postJson<ConfigIntent>('/api/chat/config-intents', { projectId, message })
 }
 
 export function getConfigChange(configChangeId: string) {
@@ -307,80 +223,5 @@ export async function removeCommand(projectId: string, name: string) {
   const payload = await response.json().catch(() => null) as ApiResponse<unknown> | null
   if (!response.ok || !payload?.success) {
     throw new Error(payload?.error?.message ?? payload?.message ?? `API request failed: ${response.status}`)
-  }
-}
-
-export function createChatSession(projectId: string, body: { title: string; agent?: string; model?: string; skills?: string[]; mcps?: string[] }) {
-  return postJson<ChatSession>(`/api/projects/${encodeURIComponent(projectId)}/chat/sessions`, body)
-}
-
-export function listChatSessions(projectId: string, status = 'all') {
-  return apiRequest<ChatSession[]>(`/api/projects/${encodeURIComponent(projectId)}/chat/sessions?status=${encodeURIComponent(status)}`)
-}
-
-export function getChatSession(projectId: string, sessionId: string) {
-  return apiRequest<ChatSessionDetail>(`/api/projects/${encodeURIComponent(projectId)}/chat/sessions/${encodeURIComponent(sessionId)}`)
-}
-
-export function updateChatSession(projectId: string, sessionId: string, body: Partial<Pick<ChatSession, 'title' | 'status' | 'agent' | 'model' | 'skills' | 'mcps'>>) {
-  return patchJson<ChatSession>(`/api/projects/${encodeURIComponent(projectId)}/chat/sessions/${encodeURIComponent(sessionId)}`, body)
-}
-
-export function deleteChatSession(projectId: string, sessionId: string) {
-  return deleteJson<{ deleted: boolean; id: string }>(`/api/projects/${encodeURIComponent(projectId)}/chat/sessions/${encodeURIComponent(sessionId)}`)
-}
-
-export function exportChatSession(projectId: string, sessionId: string) {
-  return apiRequest<ChatSessionExport>(`/api/projects/${encodeURIComponent(projectId)}/chat/sessions/${encodeURIComponent(sessionId)}/export`)
-}
-
-export function searchChatFiles(projectId: string, query: string) {
-  const params = new URLSearchParams({ q: query })
-  return apiRequest<ChatFileReference[]>(`/api/projects/${encodeURIComponent(projectId)}/chat/files?${params.toString()}`)
-}
-
-export function searchChatReferences(projectId: string, query: string) {
-  const params = new URLSearchParams({ q: query })
-  return apiRequest<ChatContextReference[]>(`/api/projects/${encodeURIComponent(projectId)}/chat/references?${params.toString()}`)
-}
-
-export function sendChatMessage(projectId: string, sessionId: string, message: string, options: ChatSubmitOptions = {}) {
-  return postJson<ChatResponse>(`/api/projects/${encodeURIComponent(projectId)}/chat/sessions/${encodeURIComponent(sessionId)}/messages`, {
-    message,
-    ...options,
-  })
-}
-
-export function respondChatPermission(projectId: string, sessionId: string, permissionId: string, response: PermissionResponse) {
-  return postJson<{ permissionId: string; response: PermissionResponse; accepted: boolean }>(
-    `/api/projects/${encodeURIComponent(projectId)}/chat/sessions/${encodeURIComponent(sessionId)}/permissions/${encodeURIComponent(permissionId)}`,
-    { response },
-  )
-}
-
-export async function streamChatMessage(projectId: string, sessionId: string, message: string, options: ChatSubmitOptions = {}, onEvent?: (event: ChatStreamEvent) => void, signal?: AbortSignal) {
-  const response = await fetch(`${apiBaseUrl}/api/projects/${encodeURIComponent(projectId)}/chat/sessions/${encodeURIComponent(sessionId)}/messages/stream`, {
-    method: 'POST',
-    credentials: 'include',
-    signal,
-    headers: {
-      Accept: 'text/event-stream',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ message, ...options }),
-  })
-
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null) as ApiResponse<unknown> | null
-    throw new Error(payload?.error?.message ?? payload?.message ?? `API request failed: ${response.status}`)
-  }
-
-  try {
-    return await readChatStream(response, onEvent, signal)
-  } catch (error) {
-    if (signal?.aborted && isAbortError(error)) {
-      throw error
-    }
-    throw error
   }
 }

@@ -1,7 +1,7 @@
 ---
 name: review
 description: "Read-only code review agent"
-mode: primary
+mode: subagent
 model: github-copilot/claude-haiku-4.5
 disable: false
 permission:

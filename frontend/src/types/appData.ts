@@ -197,17 +197,6 @@ export type CommandItem = {
   template?: string
 }
 
-export type SessionItem = {
-  id: string
-  title: string
-  status: string
-  model: string
-  openCodeSessionId?: string
-  messageCount?: number
-  lastMessageAt?: string
-  lastMessagePreview?: string
-}
-
 export type SettingItem = {
   title: string
   value: string
@@ -225,15 +214,6 @@ export type ConfigChange = {
   warnings: Array<{ code: string; message: string }>
   createdAt: string
   appliedAt?: string
-}
-
-export type ConfigIntent = {
-  intent: string
-  confidence: number
-  missingFields: string[]
-  configChangeId?: string
-  proposal: Record<string, unknown>
-  diff?: string
 }
 
 export type WorkingTreeChangeFile = {
@@ -313,148 +293,10 @@ export type SnapshotReviewClearResult = {
   generatedAt: string
 }
 
-export type ChatSession = {
-  id: string
-  projectId: string
-  openCodeSessionId?: string
-  title: string
-  agent?: string
-  model?: string
-  skills: string[]
-  mcps: string[]
-  status: string
-  createdAt: string
-  updatedAt: string
-  messageCount?: number
-  lastMessageAt?: string
-  lastMessagePreview?: string
-}
-
-export type ChatMessage = {
-  id: string
-  sessionId: string
-  role: 'user' | 'assistant' | 'system'
-  content: string
-  parts?: ChatMessagePart[]
-  createdAt: string
-  streaming?: boolean
-}
-
-export type ChatMessagePart = {
-  type?: string
-  text?: string
-  [key: string]: unknown
-}
-
-export type PermissionResponse = 'once' | 'always' | 'reject'
-
-export type ChatToolActivity = {
-  id: string
-  callId: string
-  tool: string
-  title: string
-  status: 'pending' | 'running' | 'success' | 'error'
-  input?: Record<string, unknown>
-  detail?: string
-  timestamp?: number
-}
-
-export type ChatPermissionPrompt = {
-  id: string
-  sessionId: string
-  permission: string
-  title: string
-  detail: string
-  patterns: string[]
-  metadata: Record<string, unknown>
-  tool?: {
-    messageId?: string
-    callId?: string
-  }
-  always: string[]
-  status: 'pending' | 'answered' | 'responding'
-  response?: PermissionResponse
-}
-
-export type ChatFileReference = {
-  path: string
-  name?: string
-  mime?: string
-}
-
-export type ChatContextReference = ChatFileReference & {
-  type: 'file' | 'directory'
-}
-
 export type ProjectPathReference = {
   path: string
   name: string
   type: 'file' | 'directory'
-}
-
-export type ChatSubmitOptions = {
-  agent?: string
-  model?: string
-  command?: string
-  arguments?: string
-  skills?: string[]
-  references?: ChatContextReference[]
-  files?: ChatFileReference[]
-}
-
-export type ChatTurnBackup = {
-  backupRoot: string
-  createdAt: string
-  sessionId: string
-  messageId: string
-  files: Array<{
-    id: string
-    filePath: string
-    status: string
-    additions: number
-    deletions: number
-    currentBackupPath: string
-    headBackupPath: string
-    patchBackupPath: string
-  }>
-}
-
-export type ChatTurnBackupFailure = {
-  code?: string
-  message: string
-}
-
-export type ChatResponse = {
-  sessionId: string
-  openCodeSessionId?: string
-  userMessage: ChatMessage
-  assistantMessage: ChatMessage
-  info: ChatMessage
-  parts: ChatMessagePart[]
-  configChangeId?: string
-  proposal?: Record<string, unknown>
-  backup?: ChatTurnBackup
-  backupError?: ChatTurnBackupFailure
-}
-
-export type ChatStreamEvent =
-  | { type: 'user'; message: ChatMessage }
-  | { type: 'assistant_start'; message: ChatMessage }
-  | { type: 'thinking_delta'; delta: string }
-  | { type: 'text_delta'; delta: string }
-  | { type: 'tool_activity'; activity: ChatToolActivity }
-  | { type: 'permission_prompt'; prompt: ChatPermissionPrompt }
-  | { type: 'permission_resolved'; permissionId: string; response: PermissionResponse }
-  | { type: 'done'; response: ChatResponse }
-  | { type: 'error'; error?: { message?: string } }
-
-export type ChatSessionDetail = {
-  session: ChatSession
-  messages: ChatMessage[]
-}
-
-export type ChatSessionExport = ChatSessionDetail & {
-  exportedAt: string
 }
 
 export type AppState = {
@@ -485,7 +327,6 @@ export type AppState = {
   commands: CommandItem[]
   models: string[]
   providers: ProviderItem[]
-  sessions: SessionItem[]
   audit: AuditItem[]
   settings: SettingItem[]
 }

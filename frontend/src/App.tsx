@@ -6,41 +6,30 @@ import {
   backupWorkingTreeChanges,
   clearSnapshotReviewChanges,
   createAgent,
-  createChatSession,
   createCommand,
   createMcpServer,
-  getConfigChange,
   importSkill,
   installMarketplaceSkill,
   previewConfigPatch,
   previewPermissionUpdate,
   reviewWorkingTreeChanges,
-  respondChatPermission,
-  searchChatReferences,
-  sendChatMessage,
-  streamChatMessage as streamChatMessageApi,
 } from './services/appDataService'
 import { Sidebar } from './components/layout/Sidebar'
 import { MainHeader } from './components/layout/MainHeader'
 import { SettingsModal } from './components/layout/SettingsModal'
 import { ChangePreviewModal } from './components/layout/ChangePreviewModal'
 import { ChangeReviewModal } from './components/layout/ChangeReviewModal'
-import { ChatPage } from './features/chat/ChatPage'
 import { WorkspacePage } from './pages/WorkspacePage'
 import { useAppData } from './hooks/useAppData'
 import {
-  chatNewPath,
-  chatSessionIdFromPathname,
-  chatSessionPath,
   isKnownPagePath,
-  isNewChatPath,
   navIdFromPathname,
   pagePath,
   pageTitles,
   pageUsesDetailPanel,
   type NavId,
 } from './navigation'
-import type { ChatStreamEvent, ChatSubmitOptions, ConfigChange, MarketplaceItem, PermissionResponse, WorkingTreeBackupResult, WorkingTreeReview } from './types/appData'
+import type { ConfigChange, MarketplaceItem, WorkingTreeBackupResult, WorkingTreeReview } from './types/appData'
 import type { ActionHandlers } from './types/actionHandlers'
 
 export function App() {
@@ -60,19 +49,17 @@ export function App() {
   const { data, loading, error, refresh } = useAppData()
 
   const activePage = navIdFromPathname(location.pathname)
-  const activeChatSessionId = chatSessionIdFromPathname(location.pathname)
-  const startFreshChat = isNewChatPath(location.pathname)
   const headerMeta = pageTitles[activePage]
   const projectId = data?.project.id
   const detailPanelAvailable = pageUsesDetailPanel(activePage, pendingChange)
 
   useEffect(() => {
     if (location.pathname === '/') {
-      navigate(pagePath('chat'), { replace: true })
+      navigate(pagePath('agents'), { replace: true })
       return
     }
     if (!isKnownPagePath(location.pathname)) {
-      navigate(pagePath('chat'), { replace: true })
+      navigate(pagePath('agents'), { replace: true })
     }
   }, [location.pathname, navigate])
 
@@ -87,20 +74,6 @@ export function App() {
     navigate(pagePath(id))
     setMobileNavOpen(false)
   }
-
-  const handleStartNewChat = () => {
-    navigate(chatNewPath())
-    setMobileNavOpen(false)
-  }
-
-  const handleOpenChatSession = (sessionId: string) => {
-    navigate(chatSessionPath(sessionId))
-    setMobileNavOpen(false)
-  }
-
-  const handleActiveChatSessionChange = useCallback((sessionId: string | null) => {
-    navigate(sessionId ? chatSessionPath(sessionId) : chatNewPath())
-  }, [navigate])
 
   const loadChangeReview = useCallback(async () => {
     if (!projectId) {
@@ -182,34 +155,6 @@ export function App() {
   }, [projectId, refresh])
 
   const actions: ActionHandlers = useMemo(() => ({
-    submitChatMessage: async (sessionId: string | null, message: string, options: ChatSubmitOptions = {}) => {
-      if (!projectId) {
-        throw new Error('Workspace data is not loaded yet.')
-      }
-      setActionError(null)
-      const activeSessionId = sessionId ?? (await createChatSession(projectId, {
-        title: message.slice(0, 64) || 'OpenCode chat',
-        agent: options.agent,
-        model: options.model,
-        skills: options.skills,
-      })).id
-      const response = await sendChatMessage(projectId, activeSessionId, message, options)
-      if (response.backupError) {
-        setActionError(`Chat completed, but backup failed: ${response.backupError.message}`)
-      }
-      if (response.configChangeId) {
-        void getConfigChange(response.configChangeId).then((change) => {
-          setPendingChange(change)
-          setDrawerOpen(true)
-        }).catch((caughtError) => {
-          setActionError(caughtError instanceof Error ? caughtError.message : 'Unable to load config proposal')
-        })
-      }
-      void refresh().catch((caughtError) => {
-        setActionError(caughtError instanceof Error ? caughtError.message : 'Unable to refresh app state')
-      })
-      return response
-    },
     createConfigProposal: async () => {
       await runAction(async () => {
         if (!projectId) return
@@ -282,52 +227,7 @@ export function App() {
         await createCommand(projectId, { name, description: `${name} command`, template })
       })
     },
-  }), [projectId, refresh, runAction])
-
-  const handleStreamChatMessage = useCallback(async (
-    sessionId: string | null,
-    message: string,
-    options: ChatSubmitOptions = {},
-    onEvent?: (event: ChatStreamEvent) => void,
-    signal?: AbortSignal,
-  ) => {
-    if (!projectId) {
-      throw new Error('Workspace data is not loaded yet.')
-    }
-    setActionError(null)
-    const activeSessionId = sessionId ?? (await createChatSession(projectId, {
-      title: message.slice(0, 64) || 'OpenCode chat',
-      agent: options.agent,
-      model: options.model,
-      skills: options.skills,
-    })).id
-    if (!sessionId) {
-      navigate(chatSessionPath(activeSessionId), { replace: true })
-    }
-    const response = await streamChatMessageApi(projectId, activeSessionId, message, options, onEvent, signal)
-    if (response.backupError) {
-      setActionError(`Chat completed, but backup failed: ${response.backupError.message}`)
-    }
-    if (response.configChangeId) {
-      void getConfigChange(response.configChangeId).then((change) => {
-        setPendingChange(change)
-        setDrawerOpen(true)
-      }).catch((caughtError) => {
-        setActionError(caughtError instanceof Error ? caughtError.message : 'Unable to load config proposal')
-      })
-    }
-    void refresh().catch((caughtError) => {
-      setActionError(caughtError instanceof Error ? caughtError.message : 'Unable to refresh app state')
-    })
-    return response
-  }, [navigate, projectId, refresh])
-
-  const handleRespondChatPermission = useCallback(async (sessionId: string, permissionId: string, response: PermissionResponse) => {
-    if (!projectId) {
-      throw new Error('Workspace data is not loaded yet.')
-    }
-    await respondChatPermission(projectId, sessionId, permissionId, response)
-  }, [projectId])
+  }), [projectId, runAction])
 
   const handleApplyPendingChange = useCallback(async () => {
     if (!pendingChange) return
@@ -376,7 +276,6 @@ export function App() {
         data={data}
         onToggleCollapse={() => setSidebarCollapsed((value) => !value)}
         onNavigate={handleNavigate}
-        onNewChat={handleStartNewChat}
       />
 
       <main className="main-workspace">
@@ -394,43 +293,22 @@ export function App() {
 
         <div className="workspace-scroll">
           {actionError && <div className="global-error">{actionError}</div>}
-          {activePage === 'chat' ? (
-            <ChatPage
-              projectId={projectId}
-              activeSessionId={activeChatSessionId}
-              startFresh={startFreshChat}
-              loading={loading}
-              error={error}
-              onRetry={refresh}
-              onActiveSessionChange={handleActiveChatSessionChange}
-              onSubmitMessage={actions.submitChatMessage}
-              onStreamMessage={handleStreamChatMessage}
-              onRespondPermission={handleRespondChatPermission}
-              onSearchReferences={(query) => projectId ? searchChatReferences(projectId, query) : Promise.resolve([])}
-              models={data?.models ?? []}
-              agents={data?.agents ?? []}
-              commands={data?.commands ?? []}
-              skills={data?.skills ?? []}
-            />
-          ) : (
-            <WorkspacePage
-              activePage={activePage}
-              drawerOpen={drawerOpen}
-              detailPanelAvailable={detailPanelAvailable}
-              data={data}
-              loading={loading}
-              error={error}
-              onRetry={refresh}
-              actions={actions}
-              pendingChange={pendingChange}
-              onApplyPendingChange={handleApplyPendingChange}
-              onPreviewChange={(change) => {
-                setPendingChange(change)
-                setDrawerOpen(true)
-              }}
-              onOpenChatSession={handleOpenChatSession}
-            />
-          )}
+          <WorkspacePage
+            activePage={activePage}
+            drawerOpen={drawerOpen}
+            detailPanelAvailable={detailPanelAvailable}
+            data={data}
+            loading={loading}
+            error={error}
+            onRetry={refresh}
+            actions={actions}
+            pendingChange={pendingChange}
+            onApplyPendingChange={handleApplyPendingChange}
+            onPreviewChange={(change) => {
+              setPendingChange(change)
+              setDrawerOpen(true)
+            }}
+          />
         </div>
       </main>
 

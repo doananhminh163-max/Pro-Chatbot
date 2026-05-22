@@ -2,7 +2,6 @@
 import { ApiError } from 'services/opencode-control/errors.js';
 import { registerAgentRoutes } from './api/agents.routes.js';
 import { registerAuditRoutes } from './api/audit.routes.js';
-import { registerChatRoutes } from './api/chat.routes.js';
 import { registerCommandRoutes } from './api/commands.routes.js';
 import { registerConfigRoutes } from './api/config.routes.js';
 import { registerMcpRoutes } from './api/mcp.routes.js';
@@ -20,7 +19,6 @@ const routeRegistrars = [
   registerSkillRoutes,
   registerMcpRoutes,
   registerCommandRoutes,
-  registerChatRoutes,
   registerAuditRoutes,
 ];
 

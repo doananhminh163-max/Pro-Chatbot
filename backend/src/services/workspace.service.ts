@@ -99,17 +99,6 @@ type ProviderItem = {
   source: string;
 };
 
-type SessionItem = {
-  id: string;
-  title: string;
-  status: string;
-  model: string;
-  openCodeSessionId?: string;
-  messageCount?: number;
-  lastMessageAt?: string;
-  lastMessagePreview?: string;
-};
-
 type RiskQueueItem = {
   title: string;
   detail: string;
@@ -153,7 +142,6 @@ type AppState = {
   commands: CommandItem[];
   models: string[];
   providers: ProviderItem[];
-  sessions: SessionItem[];
   audit: AuditItem[];
   settings: Array<{ title: string; value: string }>;
 };
@@ -740,29 +728,6 @@ async function collectOpenCodeConfig(root: string) {
   }
 }
 
-async function collectOpenCodeSessions(): Promise<SessionItem[]> {
-  try {
-    await ensureOpenCodeServer();
-    const body = await openCodeJson<Array<Record<string, unknown>>>('/session?scope=project&limit=30', { method: 'GET' }, undefined, 10000);
-    return body.map((session) => {
-      const time = session.time && typeof session.time === 'object' ? session.time as Record<string, unknown> : {};
-      const model = session.model && typeof session.model === 'object' ? session.model as Record<string, unknown> : {};
-      const modelId = typeof model.id === 'string' ? model.id : '';
-      const providerId = typeof model.providerID === 'string' ? model.providerID : '';
-      return {
-        id: typeof session.id === 'string' ? session.id : '',
-        title: typeof session.title === 'string' ? session.title : 'Untitled session',
-        status: typeof time.archived === 'number' && time.archived > 0 ? 'archived' : 'active',
-        model: providerId && modelId ? `${providerId}/${modelId}` : modelId || 'not declared',
-        openCodeSessionId: typeof session.id === 'string' ? session.id : undefined,
-        lastMessageAt: typeof time.updated === 'number' ? new Date(time.updated).toISOString() : undefined,
-      };
-    }).filter((session) => session.id);
-  } catch {
-    return [];
-  }
-}
-
 async function collectCurrentOpenCodeProject(root: string) {
   try {
     await ensureOpenCodeServer();
@@ -999,14 +964,13 @@ export async function getWorkspaceAppState(): Promise<AppState> {
   const packageJson = await collectPackage(root);
   const config = await collectConfig(root);
   const git = await collectGit(root);
-  const [fileSkills, openCodeSkills, fileAgents, openCodeAgents, fileCommands, openCodeCommands, sessions, openCodeServer, openCodeConfig, models, providers, openCodeProject] = await Promise.all([
+  const [fileSkills, openCodeSkills, fileAgents, openCodeAgents, fileCommands, openCodeCommands, openCodeServer, openCodeConfig, models, providers, openCodeProject] = await Promise.all([
     collectSkills(root),
     collectOpenCodeSkills(),
     collectAgents(root),
     collectOpenCodeAgents(),
     collectCommands(root),
     collectOpenCodeCommands(),
-    collectOpenCodeSessions(),
     checkOpenCodeServer(),
     collectOpenCodeConfig(root),
     collectOpenCodeModels(),
@@ -1122,7 +1086,6 @@ export async function getWorkspaceAppState(): Promise<AppState> {
     commands,
     models,
     providers,
-    sessions,
     audit,
     settings: [
       { title: 'Backend port', value: process.env.PORT ?? 'not configured' },

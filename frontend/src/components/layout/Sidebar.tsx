@@ -2,13 +2,10 @@ import {
   Bot,
   ChevronRight,
   Folder,
-  History,
   MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
-  Plus,
   User,
-  type LucideIcon,
 } from 'lucide-react'
 import { sections, type NavId } from '../../navigation'
 import type { AppState } from '../../types/appData'
@@ -19,14 +16,12 @@ export function Sidebar({
   data,
   onToggleCollapse,
   onNavigate,
-  onNewChat,
 }: {
   activePage: NavId
   collapsed: boolean
   data: AppState | null
   onToggleCollapse: () => void
   onNavigate: (id: NavId) => void
-  onNewChat: () => void
 }) {
   const badgeFor = (id: NavId) => {
     if (!data) return 0
@@ -37,12 +32,12 @@ export function Sidebar({
   return (
     <aside className="sidebar" aria-label="Main navigation">
       <div className="brand-row">
-        <button className="brand-mark" type="button" onClick={() => onNavigate('chat')}>
+        <button className="brand-mark" type="button" onClick={() => onNavigate('agents')}>
           <Bot size={21} />
         </button>
         {!collapsed && (
           <div className="brand-copy">
-            <strong>Pro Chatbot</strong>
+            <strong>OpenCode Control</strong>
             <span>OpenCode control plane</span>
           </div>
         )}
@@ -56,14 +51,9 @@ export function Sidebar({
         </button>
       </div>
 
-      <div className="sidebar-actions" aria-label="Quick actions">
-        <SidebarButton collapsed={collapsed} icon={Plus} label="New Chat" onClick={onNewChat} />
-        <SidebarButton collapsed={collapsed} icon={History} label="Session" onClick={() => onNavigate('sessions')} />
-      </div>
-
       <section className="project-switcher">
         {!collapsed && <span className="section-label">Project</span>}
-        <button className="project-card" type="button" onClick={() => onNavigate('chat')}>
+        <button className="project-card" type="button" onClick={() => onNavigate('agents')}>
           <Folder size={18} />
           {!collapsed && (
             <span>
@@ -114,23 +104,5 @@ export function Sidebar({
         {!collapsed && <MoreHorizontal size={18} />}
       </div>
     </aside>
-  )
-}
-function SidebarButton({
-  icon: Icon,
-  label,
-  collapsed,
-  onClick,
-}: {
-  icon: LucideIcon
-  label: string
-  collapsed: boolean
-  onClick: () => void
-}) {
-  return (
-    <button className="sidebar-item primary" type="button" title={collapsed ? label : undefined} onClick={onClick}>
-      <Icon size={19} />
-      {!collapsed && <span>{label}</span>}
-    </button>
   )
 }

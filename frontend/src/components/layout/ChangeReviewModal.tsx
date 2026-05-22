@@ -123,7 +123,7 @@ export function ChangeReviewModal({
           <aside className="change-review-list" aria-label="Snapshot changes">
             {loading && <div className="data-state compact">Loading snapshot changes...</div>}
             {error && <div className="data-state error compact"><span>{error}</span></div>}
-            {!loading && !error && files.length === 0 && <EmptyState title="No snapshot changes" detail="OpenCode did not return snapshot diffs for recent chat messages." />}
+            {!loading && !error && files.length === 0 && <EmptyState title="No snapshot changes" detail="OpenCode did not return snapshot diffs for recent messages." />}
             {files.map((file) => {
               const key = fileKey(file)
               const selected = selectedIds.has(key)

@@ -8,7 +8,6 @@ import { CommandsPage } from './CommandsPage'
 import { McpPage } from './McpPage'
 import { PermissionsPage } from './PermissionsPage'
 import { SkillsPage } from './SkillsPage'
-import { SessionsPage } from '../features/sessions/SessionsPage'
 
 export function WorkspacePage({
   activePage,
@@ -22,7 +21,6 @@ export function WorkspacePage({
   pendingChange,
   onApplyPendingChange,
   onPreviewChange,
-  onOpenChatSession,
 }: {
   activePage: NavId
   drawerOpen: boolean
@@ -35,19 +33,18 @@ export function WorkspacePage({
   pendingChange: ConfigChange | null
   onApplyPendingChange: () => Promise<void>
   onPreviewChange: (change: ConfigChange) => void
-  onOpenChatSession: (sessionId: string) => void
 }) {
   const showDetailPanel = drawerOpen && detailPanelAvailable && !pendingChange
 
   return (
     <section className={`workspace-grid ${showDetailPanel ? 'with-drawer' : ''}`}>
       <DataState loading={loading} error={error} onRetry={onRetry} />
-      <div className="workspace-primary">{data && renderWorkspaceContent(activePage, data, actions, onOpenChatSession, onRetry, onPreviewChange)}</div>
+      <div className="workspace-primary">{data && renderWorkspaceContent(activePage, data, actions, onRetry, onPreviewChange)}</div>
       {showDetailPanel && data && <DetailPanel activePage={activePage} data={data} pendingChange={pendingChange} onApplyPendingChange={onApplyPendingChange} />}
     </section>
   )
 }
-function renderWorkspaceContent(activePage: NavId, data: AppState, actions: ActionHandlers, onOpenChatSession: (sessionId: string) => void, onRefresh: () => void, onPreviewChange: (change: ConfigChange) => void) {
+function renderWorkspaceContent(activePage: NavId, data: AppState, actions: ActionHandlers, onRefresh: () => void, onPreviewChange: (change: ConfigChange) => void) {
   switch (activePage) {
     case 'agents':
       return <AgentsPage data={data} actions={actions} onRefresh={onRefresh} onPreviewChange={onPreviewChange} />
@@ -59,9 +56,5 @@ function renderWorkspaceContent(activePage: NavId, data: AppState, actions: Acti
       return <McpPage data={data} actions={actions} onRefresh={onRefresh} />
     case 'commands':
       return <CommandsPage data={data} actions={actions} onRefresh={onRefresh} />
-    case 'sessions':
-      return <SessionsPage data={data} onOpenChatSession={onOpenChatSession} onRefreshAppData={onRefresh} />
-    case 'chat':
-      return null
   }
 }

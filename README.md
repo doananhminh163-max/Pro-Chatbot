@@ -1,15 +1,14 @@
 # Report Analyzing
 
-A full-stack web application for managing and controlling OpenCode through an intuitive interface. Chat with OpenCode runtime, view workspace state, manage agents, permissions, skills, MCP servers, and apply configuration changes through a safe preview → review → apply workflow.
+A full-stack web application for managing and controlling OpenCode through an intuitive interface. View workspace state, manage agents, permissions, skills, MCP servers, commands, and apply configuration changes through a safe preview -> review -> apply workflow.
 
 ## Features
 
-- **Chat Interface** - Interact with OpenCode runtime with streaming support, model/agent selection, native slash commands/skills, and file or folder references (`@path`)
 - **Configuration Management** - Preview configuration changes as diffs before applying them safely with automatic backups
 - **Agent Management** - View, create, edit, and set default agents for your workspace
 - **Skills Marketplace** - Browse, install, and manage skills from the OpenCode marketplace
 - **MCP Server Management** - Configure and manage Model Context Protocol servers
-- **Session Management** - Create, track, and export OpenCode chat sessions
+- **Command Management** - Create and inspect OpenCode command templates
 - **Health & Monitoring** - Real-time workspace state aggregation and risk assessment
 - **Safe Preview/Apply Flow** - Risk classification, automatic backups, and rollback capabilities
 
@@ -121,8 +120,6 @@ All API responses follow a consistent envelope:
 |--------|----------|-------------|
 | `GET` | `/api/health` | Health check |
 | `GET` | `/api/app-state` | Complete workspace state |
-| `POST` | `/api/projects/:id/chat/sessions` | Create chat session |
-| `POST` | `/api/projects/:id/chat/sessions/:sid/messages` | Send message |
 | `POST` | `/api/config/preview` | Preview configuration changes |
 | `POST` | `/api/config/apply` | Apply reviewed changes |
 
@@ -160,15 +157,6 @@ User confirms → changes written to disk with automatic backup
 - All file operations use the preview/apply flow (except command create/delete)
 - Secrets are never logged or displayed in plain text
 - Configuration backups are automatically created before any apply operation
-
-## Chat Workflow
-
-1. User opens `/chat` and selects a model/agent
-2. User can reference files or folders with `@path/to/file` or `@path/to/folder` syntax
-3. If no session exists, system creates an OpenCode session
-4. Message is sent with OpenCode-native file attachments and local folder references
-5. OpenCode processes the request and returns response parts
-6. If message appears to request config changes, system creates a proposal with `configChangeId`
 
 ## Development Guide
 

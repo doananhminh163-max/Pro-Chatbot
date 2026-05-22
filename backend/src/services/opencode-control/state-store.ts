@@ -53,8 +53,6 @@ export async function loadState(root = resolveWorkspaceRoot()): Promise<AppState
       durableSnapshotDismissals,
       volatileState.snapshotReviewDismissals,
     ),
-    chatSessions: [],
-    chatMessages: [],
     auditLogs: [...volatileState.auditLogs],
   };
 }

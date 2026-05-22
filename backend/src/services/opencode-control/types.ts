@@ -62,29 +62,6 @@ export type MarketplaceSkillRecord = {
   content?: string;
 };
 
-export type ChatSessionRecord = {
-  id: string;
-  projectId: string;
-  openCodeSessionId?: string;
-  title: string;
-  agent?: string;
-  model?: string;
-  skills: string[];
-  mcps: string[];
-  status: 'active' | 'archived' | 'unknown';
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type ChatMessageRecord = {
-  id: string;
-  sessionId: string;
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-  parts?: Array<{ type?: string; text?: string; [key: string]: unknown }>;
-  createdAt: string;
-};
-
 export type AuditLogRecord = {
   id: string;
   configChangeId?: string;
@@ -105,8 +82,6 @@ export type AppStateStore = {
   marketplaceSkills: MarketplaceSkillRecord[];
   skillOverrides: Record<string, { status?: string }>;
   snapshotReviewDismissals: Record<string, string[]>;
-  chatSessions: ChatSessionRecord[];
-  chatMessages: ChatMessageRecord[];
   auditLogs: AuditLogRecord[];
 };
 

@@ -7,6 +7,7 @@ export {
   parseConfigIntent,
   respondChatPermission,
   searchChatFiles,
+  searchChatReferences,
   sendChatMessage,
   streamChatMessage,
   updateChatSession,

@@ -76,6 +76,7 @@
 - [13. Chatbot automation APIs](#13-chatbot-automation-apis)
   - [`POST /chat/config-intents`](#post-chatconfig-intents)
   - [`GET /projects/:projectId/chat/files`](#get-projectsprojectidchatfiles)
+  - [`GET /projects/:projectId/chat/references`](#get-projectsprojectidchatreferences)
   - [`GET /projects/:projectId/chat/sessions`](#get-projectsprojectidchatsessions)
   - [`POST /projects/:projectId/chat/sessions`](#post-projectsprojectidchatsessions)
   - [`GET /projects/:projectId/chat/sessions/:sessionId`](#get-projectsprojectidchatsessionssessionid)
@@ -557,7 +558,7 @@ Returns OpenCode snapshot diffs for recent project chat messages. This endpoint 
 
 ### `POST /projects/:projectId/changes/review/clear`
 
-Deletes real OpenCode snapshot artifacts for selected review entries while preserving OpenCode sessions and messages. For selected entries it removes matching `storage/session_diff/ses_*.json` files. If the request clears every currently visible snapshot entry for the project, it also removes the project snapshot git repo under `snapshot/:projectId` and local app snapshot backup directories under `.pro-chatbot`.
+Clears OpenCode snapshot review entries while preserving OpenCode sessions and messages. For selected entries it records durable local dismissals under `.pro-chatbot` so cleared snapshots stay hidden after backend restart, and it removes matching `storage/session_diff/ses_*.json` files when available. If the request clears every currently visible snapshot entry for the project, it also removes the project snapshot git repo under `snapshot/:projectId`.
 
 #### Request
 
@@ -592,13 +593,14 @@ If `snapshotIds` is omitted, all currently visible snapshot review entries are d
 
 ### `POST /projects/:projectId/changes/backup`
 
-Creates a manual backup for selected OpenCode snapshot review entries.
+Creates a manual backup for selected OpenCode snapshot review entries. When `restore` is `true`, the backend backs up the current files first and then asks OpenCode to revert the earliest selected snapshot message per session.
 
 #### Request
 
 ```json
 {
-  "snapshotIds": ["ses_01:msg_01:src/app.ts"]
+  "snapshotIds": ["ses_01:msg_01:src/app.ts"],
+  "restore": true
 }
 ```
 
@@ -617,10 +619,20 @@ Creates a manual backup for selected OpenCode snapshot review entries.
         "filePath": "src/app.ts",
         "status": "modified",
         "currentBackupPath": ".../current-working-tree/src/app.ts",
-        "headBackupPath": ".../snapshot-patches/src/app.ts.patch",
+        "headBackupPath": ".../git-head-original/src/app.ts",
         "patchBackupPath": ".../snapshot-patches/src/app.ts.patch"
       }
-    ]
+    ],
+    "restore": {
+      "restored": [
+        {
+          "sessionId": "ses_01",
+          "messageId": "msg_01",
+          "messageCreatedAt": "2026-05-21T15:00:00.000Z"
+        }
+      ],
+      "failed": []
+    }
   }
 }
 ```
@@ -1479,7 +1491,7 @@ Parse yêu cầu tự nhiên thành config change proposal.
 
 ### `GET /projects/:projectId/chat/files`
 
-Search workspace files for chat `@` references. The backend queries OpenCode `/find/file` first and falls back to local file search if the OpenCode file endpoint is unavailable.
+Compatibility alias that searches workspace files only for legacy chat `@` references. New clients should use `/chat/references` so directories can be returned alongside files.
 
 #### Query
 
@@ -1498,6 +1510,38 @@ Search workspace files for chat `@` references. The backend queries OpenCode `/f
       "path": "docs/openapi.md",
       "name": "openapi.md",
       "mime": "text/markdown"
+    }
+  ]
+}
+```
+
+### `GET /projects/:projectId/chat/references`
+
+Search workspace files and directories for chat `@` references. The backend queries OpenCode `/find/file` once with `type=directory` and once with `type=file`, merges directories before files, applies chat visibility filters, and falls back to local path search if OpenCode search is unavailable.
+
+#### Query
+
+| Param | Type | Required | Ghi chu |
+|---|---|---:|---|
+| `q` | string | No | Fuzzy path query. Empty query returns a small reference list. |
+| `limit` | number | No | Default `30`, max `80`. |
+
+#### Response `200`
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "path": "docs",
+      "name": "docs",
+      "type": "directory"
+    },
+    {
+      "path": "docs/openapi.md",
+      "name": "openapi.md",
+      "mime": "text/markdown",
+      "type": "file"
     }
   ]
 }
@@ -1703,7 +1747,9 @@ Compatibility endpoint for session context updates. Current OpenCode persistence
 
 ### `POST /projects/:projectId/chat/sessions/:sessionId/messages`
 
-Gửi prompt đến OpenCode session nếu adapter hỗ trợ. Optional `agent`, `model`, `skills`, `files`, `command`, and `arguments` are passed through to the OpenCode request. `files` are converted to OpenCode file parts so selected `@` references are read as context.
+Runtime fallback: if the current OpenCode runtime rejects the v2 prompt with the response-validation bug `Expected Session.Message, got {}`, text/file-only prompts fall back to legacy `POST /session/:sessionID/message`. Directory references require the v2 prompt endpoint and are not silently downgraded.
+
+Gửi prompt đến OpenCode session. Normal chat prompts use OpenCode v2 `POST /api/session/:sessionID/prompt` with native `prompt.text`, `prompt.files`, and `prompt.references`. Slash commands use OpenCode `POST /session/:sessionID/command` with `command`, `arguments`, and native file parts when file references are present. Legacy `files` is still accepted as file-only compatibility input, but new clients should send `references`.
 
 #### Request
 
@@ -1713,12 +1759,16 @@ Gửi prompt đến OpenCode session nếu adapter hỗ trợ. Optional `agent`,
   "attachments": [],
   "agent": "build",
   "model": "openai/gpt-5.4",
-  "skills": ["doc-coauthoring"],
-  "files": [{ "path": "docs/openapi.md" }],
+  "references": [
+    { "path": "docs/openapi.md", "type": "file" },
+    { "path": "docs", "type": "directory" }
+  ],
   "command": "test",
   "arguments": "backend"
 }
 ```
+
+If `command` is supplied with a directory reference, the backend returns `400` with code `COMMAND_DIRECTORY_REFERENCE_UNSUPPORTED`. Directory references are supported for normal prompts through the OpenCode v2 prompt endpoint, but not command execution or legacy fallback.
 
 #### Response `200`
 
@@ -1749,6 +1799,8 @@ Gửi prompt đến OpenCode session nếu adapter hỗ trợ. Optional `agent`,
 
 ### `POST /projects/:projectId/chat/sessions/:sessionId/messages/stream`
 
+Runtime fallback matches the non-stream endpoint, using legacy `POST /session/:sessionID/prompt_async` for text/file-only prompts when OpenCode rejects the v2 prompt with `Expected Session.Message, got {}`.
+
 Gui prompt den OpenCode session va stream ket qua qua Server-Sent Events. Endpoint nay dung `text/event-stream`, khong dung JSON envelope cho tung chunk. The same request options as the non-stream endpoint are supported. The stream separates reasoning chunks (`thinking_delta`) from main answer chunks (`text_delta`).
 
 #### Request
@@ -1759,8 +1811,10 @@ Gui prompt den OpenCode session va stream ket qua qua Server-Sent Events. Endpoi
   "attachments": [],
   "agent": "build",
   "model": "openai/gpt-5.4",
-  "skills": ["doc-coauthoring"],
-  "files": [{ "path": "docs/openapi.md" }]
+  "references": [
+    { "path": "docs/openapi.md", "type": "file" },
+    { "path": "docs", "type": "directory" }
+  ]
 }
 ```
 
@@ -1963,7 +2017,10 @@ paths:
       summary: Convert natural language request into config proposal
   /projects/{projectId}/chat/files:
     get:
-      summary: Search files for chat @ references
+      summary: Search files for legacy chat @ references
+  /projects/{projectId}/chat/references:
+    get:
+      summary: Search files and directories for chat @ references
   /projects/{projectId}/chat/sessions/{sessionId}/messages/stream:
     post:
       summary: Stream OpenCode chat response over SSE

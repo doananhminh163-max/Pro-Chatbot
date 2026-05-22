@@ -286,6 +286,19 @@ export type WorkingTreeBackupResult = {
     headBackupPath: string
     patchBackupPath?: string
   }>
+  restore?: {
+    restored: Array<{
+      sessionId: string
+      messageId: string
+      messageCreatedAt: string
+    }>
+    failed: Array<{
+      sessionId: string
+      messageId: string
+      messageCreatedAt: string
+      message: string
+    }>
+  }
 }
 
 export type SnapshotReviewClearResult = {
@@ -369,6 +382,10 @@ export type ChatFileReference = {
   mime?: string
 }
 
+export type ChatContextReference = ChatFileReference & {
+  type: 'file' | 'directory'
+}
+
 export type ProjectPathReference = {
   path: string
   name: string
@@ -381,6 +398,7 @@ export type ChatSubmitOptions = {
   command?: string
   arguments?: string
   skills?: string[]
+  references?: ChatContextReference[]
   files?: ChatFileReference[]
 }
 

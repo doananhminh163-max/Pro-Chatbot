@@ -48,7 +48,7 @@ export function ChangeReviewModal({
     }
   }
 
-  const togglePath = (file: WorkingTreeChangeFile) => {
+  const toggleSelection = (file: WorkingTreeChangeFile) => {
     const key = fileKey(file)
     setSelection((current) => {
       const currentIds = current.filesKey === filesKey ? current.ids : new Set<string>()
@@ -61,6 +61,10 @@ export function ChangeReviewModal({
       return { filesKey, ids: next }
     })
     setRequestedActiveId(key)
+  }
+
+  const activateFile = (file: WorkingTreeChangeFile) => {
+    setRequestedActiveId(fileKey(file))
   }
 
   const handleBackup = async () => {
@@ -120,20 +124,32 @@ export function ChangeReviewModal({
             {loading && <div className="data-state compact">Loading snapshot changes...</div>}
             {error && <div className="data-state error compact"><span>{error}</span></div>}
             {!loading && !error && files.length === 0 && <EmptyState title="No snapshot changes" detail="OpenCode did not return snapshot diffs for recent chat messages." />}
-            {files.map((file) => (
-              <button
-                key={fileKey(file)}
-                type="button"
-                className={activeFile && fileKey(activeFile) === fileKey(file) ? 'active' : ''}
-                onClick={() => togglePath(file)}
-              >
-                <span className="review-check" aria-hidden="true">{selectedIds.has(fileKey(file)) ? <Check size={13} /> : null}</span>
-                <span>
+            {files.map((file) => {
+              const key = fileKey(file)
+              const selected = selectedIds.has(key)
+              return (
+                <div
+                  key={key}
+                  className={`change-review-list-item${activeFile && fileKey(activeFile) === key ? ' active' : ''}`}
+                >
+                  <button
+                    type="button"
+                    className="review-check"
+                    aria-label={`${selected ? 'Deselect' : 'Select'} ${file.path}`}
+                    aria-pressed={selected}
+                    onClick={() => toggleSelection(file)}
+                  >
+                    {selected ? <Check size={13} /> : null}
+                  </button>
+                  <button type="button" className="review-summary-button" onClick={() => activateFile(file)}>
+                    <span>
                   <strong>{file.path}</strong>
                   <small>{file.sessionTitle ? `${file.statusCode} | ${file.sessionTitle}` : file.statusCode}</small>
-                </span>
-              </button>
-            ))}
+                    </span>
+                  </button>
+                </div>
+              )
+            })}
           </aside>
 
           <div className="change-review-diff">
@@ -176,15 +192,18 @@ export function ChangeReviewModal({
 
         {backupResult && (
           <div className="change-review-result">
-            <strong>Backup created</strong>
-            <span>{backupResult.backups.length} snapshot file(s) saved under {backupResult.backupRoot}</span>
+            <strong>{backupResult.restore ? 'Backup created and restore requested' : 'Backup created'}</strong>
+            <span>
+              {backupResult.backups.length} snapshot file(s) saved under {backupResult.backupRoot}
+              {backupResult.restore ? ` | Restored ${backupResult.restore.restored.length}, failed ${backupResult.restore.failed.length}` : ''}
+            </span>
           </div>
         )}
 
         <footer className="change-preview-actions">
           <button type="button" onClick={onClose}>Close</button>
           <button type="button" className="danger-action" disabled={selectedCount === 0 || backingUp} onClick={handleBackup}>
-            Backup selected ({selectedCount})
+            Backup & restore selected ({selectedCount})
           </button>
         </footer>
       </section>

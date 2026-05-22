@@ -3649,7 +3649,7 @@ button {
   gap: 6px;
   padding: 12px;
 
-  > button {
+  > .change-review-list-item {
     min-width: 0;
     border: 1px solid transparent;
     border-radius: var(--radius-sm);
@@ -3658,8 +3658,6 @@ button {
     align-items: center;
     gap: 9px;
     padding: 9px;
-    text-align: left;
-    color: var(--text-secondary);
     background: transparent;
 
     &:hover,
@@ -3667,6 +3665,15 @@ button {
       border-color: var(--border-subtle);
       background: rgba(255, 255, 255, 0.045);
     }
+  }
+
+  .review-summary-button {
+    min-width: 0;
+    border: 0;
+    padding: 0;
+    text-align: left;
+    color: var(--text-secondary);
+    background: transparent;
 
     strong,
     small {
@@ -3695,6 +3702,7 @@ button {
   border-radius: 5px;
   display: grid;
   place-items: center;
+  padding: 0;
   color: #111111;
   background: var(--accent);
 }

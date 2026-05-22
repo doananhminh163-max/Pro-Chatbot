@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getChatSession, listChatSessions } from '../../services/appDataService'
-import type { AgentItem, ChatFileReference, ChatMessage, ChatMessagePart, ChatPermissionPrompt, ChatResponse, ChatSession, ChatStreamEvent, ChatSubmitOptions, ChatToolActivity, CommandItem, PermissionResponse, SkillItem } from '../../types/appData'
+import type { AgentItem, ChatContextReference, ChatMessage, ChatMessagePart, ChatPermissionPrompt, ChatResponse, ChatSession, ChatStreamEvent, ChatSubmitOptions, ChatToolActivity, CommandItem, PermissionResponse, SkillItem } from '../../types/appData'
 import { DataState } from '../../components/common/Primitives'
 import { ChatComposer } from './ChatComposer'
 import { ChatThread } from './ChatThread'
@@ -84,7 +84,7 @@ export function ChatPage({
   onSubmitMessage,
   onStreamMessage,
   onRespondPermission,
-  onSearchFiles,
+  onSearchReferences,
   models,
   agents,
   commands,
@@ -100,7 +100,7 @@ export function ChatPage({
   onSubmitMessage: (sessionId: string | null, message: string, options?: ChatSubmitOptions) => Promise<ChatResponse>
   onStreamMessage?: (sessionId: string | null, message: string, options?: ChatSubmitOptions, onEvent?: (event: ChatStreamEvent) => void, signal?: AbortSignal) => Promise<ChatResponse>
   onRespondPermission?: (sessionId: string, permissionId: string, response: PermissionResponse) => Promise<void>
-  onSearchFiles: (query: string) => Promise<ChatFileReference[]>
+  onSearchReferences: (query: string) => Promise<ChatContextReference[]>
   models: string[]
   agents: AgentItem[]
   commands: CommandItem[]
@@ -213,9 +213,11 @@ export function ChatPage({
     setChatError(null)
     let assistantMessageId = assistantPlaceholder.id
     const streamedAssistantIds = new Set([assistantPlaceholder.id])
+    let requestSessionId = session?.id ?? activeSessionId
     try {
       if (!onStreamMessage) {
-        const response = await onSubmitMessage(session?.id ?? activeSessionId, message, options)
+        const response = await onSubmitMessage(requestSessionId, message, options)
+        requestSessionId = response.sessionId
         onActiveSessionChange(response.sessionId)
         setResumeSuppressed(false)
         setMessages((current) => [
@@ -231,14 +233,16 @@ export function ChatPage({
       setMessages((current) => [...current, assistantPlaceholder])
       const abortController = new AbortController()
       setStreamAbortController(abortController)
-      const response = await onStreamMessage(session?.id ?? activeSessionId, message, options, (event) => {
+      const response = await onStreamMessage(requestSessionId, message, options, (event) => {
         if (event.type === 'user') {
+          requestSessionId = event.message.sessionId
           streamedUserIds.add(userMessageId)
           userMessageId = event.message.id
           streamedUserIds.add(userMessageId)
           setMessages((current) => current.map((item) => item.id === optimisticMessage.id ? event.message : item))
         }
         if (event.type === 'assistant_start') {
+          requestSessionId = event.message.sessionId
           streamedAssistantIds.add(assistantMessageId)
           const previousAssistantId = assistantMessageId
           assistantMessageId = event.message.id
@@ -307,6 +311,18 @@ export function ChatPage({
         return
       }
       setChatError(caughtError instanceof Error ? caughtError.message : 'OpenCode chat failed')
+      if (projectId && requestSessionId) {
+        try {
+          const detail = await getChatSession(projectId, requestSessionId)
+          setSession(detail.session)
+          setMessages(detail.messages)
+          setSelectedModel(detail.session.model ?? '')
+          setSelectedAgent(detail.session.agent ?? '')
+          setResumeSuppressed(false)
+        } catch {
+          // Keep the streamed fallback state when the history refresh is unavailable.
+        }
+      }
       throw caughtError
     } finally {
       setStreamAbortController(null)
@@ -335,7 +351,7 @@ export function ChatPage({
           selectedAgent={selectedAgent}
           onSelectedModelChange={setSelectedModel}
           onSelectedAgentChange={setSelectedAgent}
-          onSearchFiles={onSearchFiles}
+          onSearchReferences={onSearchReferences}
           onSubmitMessage={handleSubmitMessage}
           streaming={streamAbortController !== null}
           onCancelStreaming={handleCancelStreaming}

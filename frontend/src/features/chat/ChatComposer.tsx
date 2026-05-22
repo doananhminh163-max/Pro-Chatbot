@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
-import { AtSign, Bot, Check, ChevronDown, Command, Cpu, FileText, Send, Square } from 'lucide-react'
-import type { AgentItem, ChatFileReference, ChatSubmitOptions, CommandItem, SkillItem } from '../../types/appData'
+import { AtSign, Bot, Check, ChevronDown, Command, Cpu, FileText, Folder, Send, Square } from 'lucide-react'
+import type { AgentItem, ChatContextReference, ChatSubmitOptions, CommandItem, SkillItem } from '../../types/appData'
 import { fuzzyMatch } from '../../utils/fuzzyMatch'
+import { parseChatOptions, uniqueReferences } from './chatComposerHelpers'
 
 type SlashItem = {
   kind: 'command' | 'skill'
@@ -11,7 +12,7 @@ type SlashItem = {
 }
 
 type ActiveToken = {
-  marker: '/' | '$' | '@'
+  marker: '/' | '@'
   query: string
   start: number
   end: number
@@ -21,7 +22,7 @@ function activeToken(textarea: HTMLTextAreaElement | null): ActiveToken | null {
   if (!textarea) return null
   const cursor = textarea.selectionStart
   const beforeCursor = textarea.value.slice(0, cursor)
-  const match = beforeCursor.match(/(^|\s)([/$@])([^\s]*)$/)
+  const match = beforeCursor.match(/(^|\s)([/@])([^\s]*)$/)
   if (!match || match.index === undefined) return null
   const marker = match[2] as ActiveToken['marker']
   const prefixLength = match[1].length
@@ -43,46 +44,16 @@ function shortModelName(model: string) {
   return rest.join('/') || model
 }
 
-function uniqueFiles(files: ChatFileReference[]) {
-  const seen = new Set<string>()
-  return files.filter((file) => {
-    const key = file.path.toLowerCase()
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
-}
-
-function parseChatOptions(message: string, commands: CommandItem[], skills: SkillItem[]) {
-  const trimmed = message.trimStart()
-  const marker = trimmed[0]
-  if (marker !== '/' && marker !== '$') return {}
-
-  const match = trimmed.match(/^[/$]([a-zA-Z0-9_.-]+)(?:\s+([\s\S]*))?$/)
-  if (!match) return {}
-  const name = match[1]
-  const rest = match[2]?.trim() ?? ''
-
-  if (marker === '/' && new Set(commands.map((command) => command.name)).has(name)) {
-    return { command: name, arguments: rest }
-  }
-  if (marker === '$' && new Set(skills.map((skill) => skill.name)).has(name)) {
-    return { skills: [name] }
-  }
-  return {}
-}
-
 export function ChatComposer({
   projectId,
   models,
   agents,
   commands,
-  skills,
   selectedModel,
   selectedAgent,
   onSelectedModelChange,
   onSelectedAgentChange,
-  onSearchFiles,
+  onSearchReferences,
   onSubmitMessage,
   streaming = false,
   onCancelStreaming,
@@ -96,7 +67,7 @@ export function ChatComposer({
   selectedAgent: string
   onSelectedModelChange: (model: string) => void
   onSelectedAgentChange: (agent: string) => void
-  onSearchFiles: (query: string) => Promise<ChatFileReference[]>
+  onSearchReferences: (query: string) => Promise<ChatContextReference[]>
   onSubmitMessage: (message: string, options: ChatSubmitOptions) => Promise<void>
   streaming?: boolean
   onCancelStreaming?: () => void
@@ -105,8 +76,8 @@ export function ChatComposer({
   const [submitting, setSubmitting] = useState(false)
   const [activeMenu, setActiveMenu] = useState<'model' | 'agent' | null>(null)
   const [token, setToken] = useState<ActiveToken | null>(null)
-  const [fileResults, setFileResults] = useState<ChatFileReference[]>([])
-  const [selectedFiles, setSelectedFiles] = useState<ChatFileReference[]>([])
+  const [referenceResults, setReferenceResults] = useState<ChatContextReference[]>([])
+  const [selectedReferences, setSelectedReferences] = useState<ChatContextReference[]>([])
   const [highlightedIndex, setHighlightedIndex] = useState(0)
   const [modelQuery, setModelQuery] = useState('')
   const [agentQuery, setAgentQuery] = useState('')
@@ -124,26 +95,16 @@ export function ChatComposer({
     }))
   ), [commands])
 
-  const skillItems = useMemo<SlashItem[]>(() => (
-    skills.map((skill) => ({
-      kind: 'skill' as const,
-      name: skill.name,
-      description: skill.description || 'OpenCode skill',
-      source: skill.scope,
-    }))
-  ), [skills])
-
   const visibleSlashItems = useMemo(() => {
-    if (token?.marker !== '/' && token?.marker !== '$') return []
+    if (token?.marker !== '/') return []
     const query = token.query
-    const items = token.marker === '/' ? commandItems : skillItems
-    return items
+    return commandItems
       .filter((item) => fuzzyMatch(item.name, query) || fuzzyMatch(item.description, query))
-  }, [commandItems, skillItems, token])
+  }, [commandItems, token])
   const selectableAgents = useMemo(() => agents.filter((agent) => agent.mode !== 'system'), [agents])
-  const slashOpen = (token?.marker === '/' || token?.marker === '$') && visibleSlashItems.length > 0
-  const fileOpen = token?.marker === '@' && fileResults.length > 0
-  const paletteOpen = slashOpen || fileOpen
+  const slashOpen = token?.marker === '/' && visibleSlashItems.length > 0
+  const referenceOpen = token?.marker === '@' && referenceResults.length > 0
+  const paletteOpen = slashOpen || referenceOpen
 
   const filteredModels = useMemo(() => {
     if (!modelQuery) return models
@@ -175,10 +136,10 @@ export function ChatComposer({
 
     let active = true
     const timeout = window.setTimeout(() => {
-      void onSearchFiles(token.query).then((results) => {
-        if (active) setFileResults(results.slice(0, 9))
+      void onSearchReferences(token.query).then((results) => {
+        if (active) setReferenceResults(results.slice(0, 9))
       }).catch(() => {
-        if (active) setFileResults([])
+        if (active) setReferenceResults([])
       })
     }, 120)
 
@@ -186,7 +147,7 @@ export function ChatComposer({
       active = false
       window.clearTimeout(timeout)
     }
-  }, [onSearchFiles, projectId, token])
+  }, [onSearchReferences, projectId, token])
 
   useLayoutEffect(() => {
     if (!paletteOpen) return
@@ -217,7 +178,7 @@ export function ChatComposer({
       window.removeEventListener('resize', updatePaletteHeight)
       window.removeEventListener('scroll', updatePaletteHeight, true)
     }
-  }, [paletteOpen, visibleSlashItems.length, fileResults.length])
+  }, [paletteOpen, visibleSlashItems.length, referenceResults.length])
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current
@@ -242,7 +203,7 @@ export function ChatComposer({
       setToken(nextToken)
       setHighlightedIndex(0)
       if (nextToken?.marker !== '@') {
-        setFileResults([])
+        setReferenceResults([])
       }
     })
   }
@@ -266,19 +227,18 @@ export function ChatComposer({
   }
 
   const selectSlashItem = (item: SlashItem) => {
-    if (!token || (token.marker !== '/' && token.marker !== '$')) return
-    const marker = item.kind === 'skill' ? '$' : '/'
-    const nextMessage = replaceActiveToken(message, token, `${marker}${item.name} `)
+    if (!token || token.marker !== '/') return
+    const nextMessage = replaceActiveToken(message, token, `/${item.name} `)
     setMessage(nextMessage)
     setToken(null)
     textareaRef.current?.focus()
   }
 
-  const selectFile = (file: ChatFileReference) => {
+  const selectReference = (reference: ChatContextReference) => {
     if (!token || token.marker !== '@') return
-    const nextMessage = replaceActiveToken(message, token, `@${file.path} `)
+    const nextMessage = replaceActiveToken(message, token, `@${reference.path} `)
     setMessage(nextMessage)
-    setSelectedFiles((current) => uniqueFiles([...current, file]))
+    setSelectedReferences((current) => uniqueReferences([...current, reference]))
     setToken(null)
     textareaRef.current?.focus()
   }
@@ -288,23 +248,23 @@ export function ChatComposer({
     const trimmed = message.trim()
     if (!trimmed || submitting) return
 
-    const slashOptions = parseChatOptions(trimmed, commands, skills)
+    const slashOptions = parseChatOptions(trimmed, commands)
     const options: ChatSubmitOptions = {
       ...slashOptions,
       agent: selectedAgent || undefined,
       model: selectedModel || undefined,
-      files: selectedFiles.length > 0 ? selectedFiles : undefined,
+      references: selectedReferences.length > 0 ? selectedReferences : undefined,
     }
 
     setSubmitting(true)
     setMessage('')
-    setSelectedFiles([])
+    setSelectedReferences([])
     setToken(null)
     try {
       await onSubmitMessage(trimmed, options)
     } catch (error) {
       setMessage(trimmed)
-      setSelectedFiles(options.files ?? [])
+      setSelectedReferences(options.references ?? [])
       throw error
     } finally {
       setSubmitting(false)
@@ -312,7 +272,7 @@ export function ChatComposer({
   }
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    const activeItems = slashOpen ? visibleSlashItems : fileOpen ? fileResults : []
+    const activeItems = slashOpen ? visibleSlashItems : referenceOpen ? referenceResults : []
 
     if (activeItems.length > 0) {
       if (event.key === 'ArrowDown') {
@@ -329,8 +289,8 @@ export function ChatComposer({
         event.preventDefault()
         if (slashOpen) {
           selectSlashItem(visibleSlashItems[Math.min(highlightedIndex, visibleSlashItems.length - 1)])
-        } else if (fileOpen) {
-          selectFile(fileResults[Math.min(highlightedIndex, fileResults.length - 1)])
+        } else if (referenceOpen) {
+          selectReference(referenceResults[Math.min(highlightedIndex, referenceResults.length - 1)])
         }
         return
       }
@@ -423,7 +383,7 @@ export function ChatComposer({
         <textarea
           id="composer-input"
           ref={textareaRef}
-          placeholder="Ask OpenCode...  / for commands, $ for skills, @ for files"
+          placeholder="Ask OpenCode...  / for commands and skills, @ for files/folders"
           rows={1}
           value={message}
           onBlur={(event) => {
@@ -450,40 +410,40 @@ export function ChatComposer({
         )}
       </div>
 
-      {selectedFiles.length > 0 && (
-        <div className="composer-context-chips" aria-label="Attached files">
-          {selectedFiles.map((file) => (
-            <button key={file.path} type="button" onClick={() => setSelectedFiles((current) => current.filter((item) => item.path !== file.path))}>
-              <FileText size={13} />
-              <span>{file.path}</span>
+      {selectedReferences.length > 0 && (
+        <div className="composer-context-chips" aria-label="Attached references">
+          {selectedReferences.map((reference) => (
+            <button key={`${reference.type}-${reference.path}`} type="button" onClick={() => setSelectedReferences((current) => current.filter((item) => item.path !== reference.path || item.type !== reference.type))}>
+              {reference.type === 'directory' ? <Folder size={13} /> : <FileText size={13} />}
+              <span>{reference.path}</span>
             </button>
           ))}
         </div>
       )}
 
-      {(token?.marker === '/' || token?.marker === '$') && visibleSlashItems.length > 0 && (
-        <div className="composer-palette" role="listbox" aria-label={token.marker === '$' ? 'Skills' : 'Commands'}>
+      {token?.marker === '/' && visibleSlashItems.length > 0 && (
+        <div className="composer-palette" role="listbox" aria-label="Commands and skills">
           {visibleSlashItems.map((item, index) => (
             <button key={`${item.kind}-${item.name}`} type="button" className={index === highlightedIndex ? 'active' : ''} onMouseDown={(event) => event.preventDefault()} onClick={() => selectSlashItem(item)}>
-              {item.kind === 'command' ? <Command size={15} /> : <Bot size={15} />}
+              <Command size={15} />
               <span>
-                <strong>{item.kind === 'skill' ? '$' : '/'}{item.name}</strong>
+                <strong>/{item.name}</strong>
                 <small>{item.description}</small>
               </span>
-              <em>{item.kind}</em>
+              <em>{item.source}</em>
             </button>
           ))}
         </div>
       )}
 
-      {token?.marker === '@' && fileResults.length > 0 && (
-        <div className="composer-palette" role="listbox" aria-label="Files">
-          {fileResults.map((file, index) => (
-            <button key={file.path} type="button" className={index === highlightedIndex ? 'active' : ''} onMouseDown={(event) => event.preventDefault()} onClick={() => selectFile(file)}>
-              <AtSign size={15} />
+      {token?.marker === '@' && referenceResults.length > 0 && (
+        <div className="composer-palette" role="listbox" aria-label="Files and folders">
+          {referenceResults.map((reference, index) => (
+            <button key={`${reference.type}-${reference.path}`} type="button" className={index === highlightedIndex ? 'active' : ''} onMouseDown={(event) => event.preventDefault()} onClick={() => selectReference(reference)}>
+              {reference.type === 'directory' ? <Folder size={15} /> : <AtSign size={15} />}
               <span>
-                <strong>{file.path}</strong>
-                <small>{file.mime ?? 'workspace file'}</small>
+                <strong>{reference.path}</strong>
+                <small>{reference.type === 'directory' ? 'workspace folder' : reference.mime ?? 'workspace file'}</small>
               </span>
             </button>
           ))}

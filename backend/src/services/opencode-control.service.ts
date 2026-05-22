@@ -1787,24 +1787,7 @@ async function listOpenCodeCommands(connection?: ServerConnectionRecord) {
   try {
     await ensureOpenCodeServer(connection);
     const commands = await openCodeJson<Array<Record<string, unknown>>>('/command', { method: 'GET' }, connection, 10000);
-    return commands
-      .filter((command) => command.source === 'command')
-      .map((command) => {
-      const name = String(command.name ?? '');
-      const source = String(command.source ?? 'builtin');
-      return {
-        name,
-        description: typeof command.description === 'string' ? command.description : 'OpenCode command.',
-        agent: typeof command.agent === 'string' ? command.agent : undefined,
-        model: typeof command.model === 'string' ? command.model : undefined,
-        sourcePath: `${source}:/${name}`,
-        preview: typeof command.template === 'string' ? command.template.slice(0, 2000) : '',
-        source,
-        builtIn: true,
-        frontmatter: {},
-        template: typeof command.template === 'string' ? command.template : '',
-      };
-    }).filter((command) => command.name);
+    return mapOpenCodeCommandRecords(commands);
   } catch {
     return FALLBACK_BUILTIN_COMMANDS.map((command) => ({
       ...command,
@@ -1817,6 +1800,27 @@ async function listOpenCodeCommands(connection?: ServerConnectionRecord) {
       frontmatter: {},
     }));
   }
+}
+
+export function mapOpenCodeCommandRecords(commands: Array<Record<string, unknown>>) {
+  return commands
+    .map((command) => {
+      const name = String(command.name ?? '').trim();
+      const source = String(command.source ?? 'builtin').trim() || 'builtin';
+      return {
+        name,
+        description: typeof command.description === 'string' ? command.description : 'OpenCode command.',
+        agent: typeof command.agent === 'string' ? command.agent : undefined,
+        model: typeof command.model === 'string' ? command.model : undefined,
+        sourcePath: `${source}:/${name}`,
+        preview: typeof command.template === 'string' ? command.template.slice(0, 2000) : '',
+        source,
+        builtIn: true,
+        frontmatter: {},
+        template: typeof command.template === 'string' ? command.template : '',
+      };
+    })
+    .filter((command) => command.name);
 }
 
 export async function listCommands(projectId: string) {
@@ -2044,9 +2048,18 @@ function hasOpenCodePartText(parts: ChatMessageRecord['parts'] | undefined, type
   return Array.isArray(parts) && parts.some((part) => part.type === type && typeof part.text === 'string' && part.text.trim().length > 0);
 }
 
-type ChatRequestFile = {
+type ChatContextReferenceInput = {
   path?: string;
   name?: string;
+  mime?: string;
+  type?: 'file' | 'directory';
+};
+
+type NormalizedChatReference = {
+  absolutePath: string;
+  relativePath: string;
+  type: 'file' | 'directory';
+  name: string;
   mime?: string;
 };
 
@@ -2056,7 +2069,8 @@ type ChatRequestOptions = {
   command?: string;
   arguments?: string;
   skills?: string[];
-  files?: ChatRequestFile[];
+  references?: ChatContextReferenceInput[];
+  files?: ChatContextReferenceInput[];
   signal?: AbortSignal;
 };
 
@@ -2180,17 +2194,20 @@ function mimeForPath(filePath: string) {
   return 'text/plain';
 }
 
-function isChatSearchVisibleFile(filePath: string) {
+function isChatSearchVisibleReference(filePath: string) {
   const normalized = filePath.replace(/\\/g, '/').toLowerCase();
   return !normalized.includes('/node_modules/')
     && !normalized.startsWith('node_modules/')
+    && normalized !== 'node_modules'
     && !normalized.includes('/.git/')
     && !normalized.startsWith('.git/')
+    && normalized !== '.git'
     && !normalized.includes('/dist/')
-    && !normalized.startsWith('dist/');
+    && !normalized.startsWith('dist/')
+    && normalized !== 'dist';
 }
 
-function parseMentionedFiles(message: string) {
+function parseMentionedReferences(message: string) {
   const references = [];
   for (const match of message.matchAll(/(^|\s)@([^\s]+)/g)) {
     const rawPath = match[2].replace(/[),.;:]+$/g, '');
@@ -2201,117 +2218,253 @@ function parseMentionedFiles(message: string) {
   return references;
 }
 
-function normalizeChatFiles(project: ProjectRecord, message: string, files?: ChatRequestFile[]) {
-  const values = [
-    ...(files ?? []).map((file) => file.path ?? file.name ?? '').filter(Boolean),
-    ...parseMentionedFiles(message),
+export async function normalizeChatReference(project: ProjectRecord, input: ChatContextReferenceInput): Promise<NormalizedChatReference> {
+  const requestedPath = (input.path ?? input.name ?? '').trim();
+  if (!requestedPath) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Reference path is required');
+  }
+
+  const absolutePath = resolveProjectPath(project, requestedPath);
+  const relativePath = toProjectRelative(project, absolutePath).replace(/\\/g, '/');
+  if (!isChatSearchVisibleReference(relativePath)) {
+    throw new ApiError(403, 'REFERENCE_NOT_VISIBLE', `Reference is not visible to chat search: ${relativePath}`);
+  }
+
+  const stat = await fs.stat(absolutePath).catch(() => null);
+  if (!stat) {
+    throw new ApiError(404, 'REFERENCE_NOT_FOUND', `Reference not found: ${relativePath}`);
+  }
+
+  const inferredType = stat.isDirectory() ? 'directory' : 'file';
+  const type = input.type ?? inferredType;
+  if (type === 'file' && !stat.isFile()) {
+    throw new ApiError(400, 'REFERENCE_TYPE_MISMATCH', `Reference is not a file: ${relativePath}`);
+  }
+  if (type === 'directory' && !stat.isDirectory()) {
+    throw new ApiError(400, 'REFERENCE_TYPE_MISMATCH', `Reference is not a directory: ${relativePath}`);
+  }
+
+  return {
+    absolutePath,
+    relativePath,
+    type,
+    name: input.name?.trim() || path.basename(relativePath),
+    mime: type === 'file' ? input.mime || mimeForPath(relativePath) : input.mime,
+  };
+}
+
+export async function normalizeChatReferences(project: ProjectRecord, message: string, options: ChatRequestOptions = {}) {
+  const inputs: ChatContextReferenceInput[] = [
+    ...(options.references ?? []),
+    ...(options.files ?? []).map((file) => ({ ...file, type: 'file' as const })),
+    ...parseMentionedReferences(message).map((referencePath) => ({ path: referencePath })),
   ];
+  const references: NormalizedChatReference[] = [];
   const seen = new Set<string>();
-  return values.flatMap((value) => {
-    const absolutePath = resolveProjectPath(project, value);
-    const relativePath = toProjectRelative(project, absolutePath).replace(/\\/g, '/');
-    const key = relativePath.toLowerCase();
-    if (seen.has(key)) return [];
+
+  for (const input of inputs) {
+    const reference = await normalizeChatReference(project, input);
+    const key = `${reference.type}:${reference.relativePath.toLowerCase()}`;
+    if (seen.has(key)) continue;
     seen.add(key);
-    return [{ absolutePath, relativePath }];
-  });
-}
-
-async function selectedFileMentions(project: ProjectRecord, text: string, files?: ChatRequestFile[]) {
-  const selectedReferences = normalizeChatFiles(project, '', files);
-  if (selectedReferences.length === 0) return [];
-
-  const mentionedKeys = new Set(normalizeChatFiles(project, text).map((reference) => reference.relativePath.toLowerCase()));
-  const mentions = [];
-  for (const reference of selectedReferences) {
-    if (mentionedKeys.has(reference.relativePath.toLowerCase())) continue;
-
-    // Validate the file chip while leaving OpenCode to load content through its native read tool.
-    // This preserves tool-call visibility and avoids duplicating file contents in our API layer.
-    const stat = await fs.stat(reference.absolutePath).catch(() => null);
-    if (!stat?.isFile()) {
-      throw new ApiError(404, 'FILE_REFERENCE_NOT_FOUND', `File reference not found: ${reference.relativePath}`);
-    }
-    mentions.push(`@${reference.relativePath}`);
-  }
-  return mentions;
-}
-
-async function buildOpenCodePromptText(project: ProjectRecord, message: string, options: ChatRequestOptions) {
-  let text = await buildPromptText(project, message, options);
-  const mentions = await selectedFileMentions(project, text, options.files);
-  if (mentions.length > 0) {
-    text = [
-      text,
-      `Use the read tool for these selected files if they are relevant:\n${mentions.join('\n')}`,
-    ].filter(Boolean).join('\n\n');
-  }
-  return text;
-}
-
-async function buildCommandArguments(project: ProjectRecord, commandArguments: string, options: ChatRequestOptions) {
-  let text = commandArguments;
-  const mentions = await selectedFileMentions(project, text, options.files);
-  if (mentions.length > 0) {
-    text = [
-      text,
-      `Use the read tool for these selected files if they are relevant:\n${mentions.join('\n')}`,
-    ].filter(Boolean).join('\n\n');
-  }
-  return text;
-}
-
-function uniqueSkillNames(skills?: string[]) {
-  return Array.from(new Set((skills ?? [])
-    .map((skill) => skill.trim())
-    .filter((skill) => /^[a-z0-9][a-z0-9-]{0,63}$/i.test(skill))));
-}
-
-async function selectedSkillBlocks(project: ProjectRecord, skillNames?: string[]) {
-  const names = uniqueSkillNames(skillNames);
-  if (names.length === 0) return [];
-
-  const availableSkills = await scanSkills(project);
-  const byName = new Map(availableSkills.map((skill) => [skill.name.toLowerCase(), skill]));
-  const blocks = [];
-
-  for (const skillName of names) {
-    const skill = byName.get(skillName.toLowerCase());
-    if (!skill) {
-      throw new ApiError(404, 'SKILL_NOT_FOUND', `Skill not found: ${skillName}`);
-    }
-    const content = await readText(skill.sourcePath, 120000);
-    const body = removeFrontMatter(content).trim();
-    blocks.push([
-      `## Skill: ${skill.name}`,
-      body || content.trim(),
-    ].join('\n\n'));
+    references.push(reference);
   }
 
-  return blocks;
+  return references;
 }
 
-async function buildPromptText(project: ProjectRecord, message: string, options: ChatRequestOptions) {
-  const skills = uniqueSkillNames(options.skills);
-  const skillBlocks = await selectedSkillBlocks(project, skills);
-  if (skillBlocks.length === 0) return message;
+type PromptFileAttachment = {
+  uri: string;
+  mime: string;
+  name: string;
+  source: { start: number; end: number; text: string };
+};
 
-  let text = message;
-  if (skills.length === 1) {
-    text = text.replace(new RegExp(`^\\s*\\$${skills[0]}(?:\\s+|$)`, 'i'), '').trim();
+type PromptReferenceAttachment = {
+  name: string;
+  kind: 'local';
+  uri: string;
+  target: string;
+  targetUri: string;
+  source: { start: number; end: number; text: string };
+};
+
+type FilePartInput = {
+  type: 'file';
+  mime: string;
+  filename: string;
+  url: string;
+  source: {
+    type: 'file';
+    path: string;
+    text: { value: string; start: number; end: number };
+  };
+};
+
+type TextPartInput = {
+  type: 'text';
+  text: string;
+};
+
+type LegacyPromptPartInput = TextPartInput | FilePartInput;
+
+export async function buildPromptFileAttachments(project: ProjectRecord, references: NormalizedChatReference[]): Promise<PromptFileAttachment[]> {
+  void project;
+  const attachments: PromptFileAttachment[] = [];
+  for (const reference of references) {
+    if (reference.type !== 'file') continue;
+    const text = await fs.readFile(reference.absolutePath, 'utf8');
+    attachments.push({
+      uri: reference.absolutePath,
+      mime: reference.mime || mimeForPath(reference.relativePath),
+      name: reference.name,
+      source: { start: 0, end: text.length, text },
+    });
+  }
+  return attachments;
+}
+
+export function buildPromptReferenceAttachments(project: ProjectRecord, references: NormalizedChatReference[]): PromptReferenceAttachment[] {
+  void project;
+  return references
+    .filter((reference) => reference.type === 'directory')
+    .map((reference) => ({
+      name: reference.name,
+      kind: 'local' as const,
+      uri: reference.absolutePath,
+      target: reference.relativePath,
+      targetUri: reference.absolutePath,
+      source: { start: 0, end: 0, text: `@${reference.relativePath}` },
+    }));
+}
+
+async function buildFilePartInputs(project: ProjectRecord, references: NormalizedChatReference[]): Promise<FilePartInput[]> {
+  void project;
+  const parts: FilePartInput[] = [];
+  for (const reference of references) {
+    if (reference.type !== 'file') continue;
+    const text = await fs.readFile(reference.absolutePath, 'utf8');
+    parts.push({
+      type: 'file',
+      mime: reference.mime || mimeForPath(reference.relativePath),
+      filename: reference.name,
+      url: reference.absolutePath,
+      source: {
+        type: 'file',
+        path: reference.relativePath,
+        text: { value: text, start: 0, end: text.length },
+      },
+    });
+  }
+  return parts;
+}
+
+export async function buildCommandFileParts(project: ProjectRecord, references: NormalizedChatReference[]): Promise<FilePartInput[]> {
+  const directoryReference = references.find((reference) => reference.type === 'directory');
+  if (directoryReference) {
+    throw new ApiError(
+      400,
+      'COMMAND_DIRECTORY_REFERENCE_UNSUPPORTED',
+      'Directory references are supported for normal prompts but not command execution.',
+      { path: directoryReference.relativePath },
+    );
+  }
+
+  return buildFilePartInputs(project, references);
+}
+
+export async function buildLegacyPromptParts(project: ProjectRecord, message: string, references: NormalizedChatReference[]): Promise<LegacyPromptPartInput[]> {
+  const directoryReference = references.find((reference) => reference.type === 'directory');
+  if (directoryReference) {
+    throw new ApiError(
+      502,
+      'LEGACY_PROMPT_DIRECTORY_REFERENCE_UNSUPPORTED',
+      'Directory references require the OpenCode v2 prompt endpoint and cannot be sent through the legacy prompt endpoint.',
+      { path: directoryReference.relativePath },
+    );
   }
 
   return [
-    ...skillBlocks,
-    '## User request',
-    text,
-  ].filter(Boolean).join('\n\n');
-}
-
-async function buildPromptParts(project: ProjectRecord, message: string, options: ChatRequestOptions) {
-  return [
-    { type: 'text', text: await buildOpenCodePromptText(project, message, options) },
+    { type: 'text', text: message },
+    ...await buildFilePartInputs(project, references),
   ];
+}
+
+async function buildOpenCodePromptFromReferences(project: ProjectRecord, message: string, references: NormalizedChatReference[]) {
+  return {
+    text: message,
+    files: await buildPromptFileAttachments(project, references),
+    references: buildPromptReferenceAttachments(project, references),
+  };
+}
+
+export async function buildOpenCodePrompt(project: ProjectRecord, message: string, options: ChatRequestOptions = {}) {
+  const references = await normalizeChatReferences(project, message, options);
+  return buildOpenCodePromptFromReferences(project, message, references);
+}
+
+export function isOpenCodeV2PromptResponseValidationBug(detail: string) {
+  if (!detail.includes('Expected Session.Message, got {}')) {
+    return false;
+  }
+
+  try {
+    const parsed = JSON.parse(detail) as unknown;
+    const data = isPlainObject(parsed) && isPlainObject(parsed.data) ? parsed.data : parsed;
+    return isPlainObject(data)
+      && data.message === 'Expected Session.Message, got {}'
+      && data.kind === 'Body';
+  } catch {
+    return /\bBody\b/.test(detail);
+  }
+}
+
+export function shouldFallbackToLegacyPrompt(detail: string, references: NormalizedChatReference[]) {
+  return isOpenCodeV2PromptResponseValidationBug(detail)
+    && !references.some((reference) => reference.type === 'directory');
+}
+
+function openCodePromptQuery(project: ProjectRecord) {
+  return new URLSearchParams({ directory: project.rootPath }).toString();
+}
+
+function openCodeV2PromptPath(project: ProjectRecord, sessionId: string) {
+  return `/api/session/${encodeURIComponent(sessionId)}/prompt?${openCodePromptQuery(project)}`;
+}
+
+function openCodeLegacyPromptPath(project: ProjectRecord, sessionId: string) {
+  return `/session/${encodeURIComponent(sessionId)}/message?${openCodePromptQuery(project)}`;
+}
+
+function openCodeLegacyPromptAsyncPath(project: ProjectRecord, sessionId: string) {
+  return `/session/${encodeURIComponent(sessionId)}/prompt_async?${openCodePromptQuery(project)}`;
+}
+
+function openCodeErrorDetail(error: unknown) {
+  if (!(error instanceof ApiError) || !isPlainObject(error.details)) return '';
+  return typeof error.details.detail === 'string' ? error.details.detail : '';
+}
+
+function throwOpenCodeV2DirectoryReferenceError(sessionId: string, detail: string): never {
+  throw new ApiError(
+    502,
+    'OPENCODE_V2_PROMPT_UNAVAILABLE',
+    'OpenCode v2 prompt endpoint rejected the request, and directory references cannot be sent through the legacy prompt endpoint.',
+    {
+      path: `/api/session/${sessionId}/prompt`,
+      detail: detail.slice(0, 2000),
+    },
+  );
+}
+
+async function buildLegacyPromptBody(project: ProjectRecord, session: ChatSessionRecord, message: string, references: NormalizedChatReference[], options: ChatRequestOptions = {}) {
+  const body: Record<string, unknown> = {
+    parts: await buildLegacyPromptParts(project, message, references),
+  };
+  const model = parseOpenCodeModel(options.model ?? session.model);
+  if (model) body.model = model;
+  if (options.agent ?? session.agent) body.agent = options.agent ?? session.agent;
+  return body;
 }
 
 async function promptOpenCodeSession(project: ProjectRecord, session: ChatSessionRecord, message: string, connection?: ServerConnectionRecord, options: ChatRequestOptions = {}) {
@@ -2324,17 +2477,29 @@ async function promptOpenCodeSession(project: ProjectRecord, session: ChatSessio
     throw new ApiError(502, 'OPENCODE_SESSION_FAILED', 'OpenCode did not return a session id.');
   }
 
+  const references = await normalizeChatReferences(project, message, options);
   const body: Record<string, unknown> = {
-    parts: await buildPromptParts(project, message, options),
+    prompt: await buildOpenCodePromptFromReferences(project, message, references),
   };
-  const model = parseOpenCodeModel(options.model ?? session.model);
-  if (model) body.model = model;
-  if (options.agent ?? session.agent) body.agent = options.agent ?? session.agent;
 
-  return openCodeJson<OpenCodeMessageResponse>(`/session/${encodeURIComponent(session.openCodeSessionId)}/message`, {
-    method: 'POST',
-    body: JSON.stringify(body),
-  }, connection, 120000);
+  try {
+    return await openCodeJson<OpenCodeMessageResponse>(openCodeV2PromptPath(project, session.openCodeSessionId), {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }, connection, 120000);
+  } catch (error) {
+    const detail = openCodeErrorDetail(error);
+    if (shouldFallbackToLegacyPrompt(detail, references)) {
+      return openCodeJson<OpenCodeMessageResponse>(openCodeLegacyPromptPath(project, session.openCodeSessionId), {
+        method: 'POST',
+        body: JSON.stringify(await buildLegacyPromptBody(project, session, message, references, options)),
+      }, connection, 120000);
+    }
+    if (isOpenCodeV2PromptResponseValidationBug(detail)) {
+      throwOpenCodeV2DirectoryReferenceError(session.openCodeSessionId, detail);
+    }
+    throw error;
+  }
 }
 
 export async function createChatSession(projectId: string, input: {
@@ -2406,14 +2571,16 @@ export async function getChatSession(projectId: string, sessionId: string) {
     .map((message) => mapOpenCodeMessage(message, session.id))
     .filter((message): message is ChatMessageRecord => !!message)
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  const pendingPermissions = await listPendingPermissionPrompts(connection, session.id);
+  const messagesWithPendingPermissions = appendPendingPermissionPrompts(mappedMessages, pendingPermissions);
   return {
     session: {
       ...session,
-      messageCount: mappedMessages.length,
-      lastMessageAt: mappedMessages.at(-1)?.createdAt ?? session.updatedAt,
-      lastMessagePreview: mappedMessages.at(-1)?.content.slice(0, 180) ?? '',
+      messageCount: messagesWithPendingPermissions.length,
+      lastMessageAt: messagesWithPendingPermissions.at(-1)?.createdAt ?? session.updatedAt,
+      lastMessagePreview: messagesWithPendingPermissions.at(-1)?.content.slice(0, 180) ?? '',
     },
-    messages: mappedMessages,
+    messages: messagesWithPendingPermissions,
   };
 }
 
@@ -2452,31 +2619,50 @@ export async function updateChatSession(projectId: string, sessionId: string, in
 }
 
 export async function searchChatFiles(projectId: string, query: { q?: string; limit?: number }) {
+  return (await searchChatReferences(projectId, query))
+    .filter((reference) => reference.type === 'file')
+    .map((reference) => ({
+      path: reference.path,
+      name: reference.name,
+      mime: reference.mime,
+    }));
+}
+
+export async function searchChatReferences(projectId: string, query: { q?: string; limit?: number }) {
   const state = await loadState();
   const project = assertProject(state, projectId);
   const connection = getDefaultServerConnection(state, project);
   const searchText = query.q?.trim() || '';
   const limit = Math.min(Math.max(Number(query.limit) || 30, 1), 80);
+  const results = new Map<string, { path: string; name: string; mime?: string; type: 'file' | 'directory' }>();
+  const addResult = (item: string, type: 'file' | 'directory') => {
+    const absolutePath = resolveProjectPath(project, item);
+    const relativePath = toProjectRelative(project, absolutePath).replace(/\\/g, '/');
+    if (!isChatSearchVisibleReference(relativePath)) return;
+    const key = `${type}:${relativePath.toLowerCase()}`;
+    if (results.has(key)) return;
+    results.set(key, {
+      path: relativePath,
+      name: path.basename(relativePath),
+      mime: type === 'file' ? mimeForPath(relativePath) : undefined,
+      type,
+    });
+  };
 
   try {
     await ensureOpenCodeServer(connection);
-    const params = new URLSearchParams({
-      directory: project.rootPath,
-      query: searchText || '.',
-      type: 'file',
-      limit: String(limit),
-    });
-    const paths = await openCodeJson<string[]>(`/find/file?${params.toString()}`, { method: 'GET' }, connection, 10000);
-    return paths.flatMap((item) => {
-      const absolutePath = resolveProjectPath(project, item);
-      const relativePath = toProjectRelative(project, absolutePath).replace(/\\/g, '/');
-      if (!isChatSearchVisibleFile(relativePath)) return [];
-      return [{
-        path: relativePath,
-        name: path.basename(relativePath),
-        mime: mimeForPath(relativePath),
-      }];
-    }).slice(0, limit);
+    const searchByType = async (type: 'file' | 'directory') => {
+      const params = new URLSearchParams({
+        directory: project.rootPath,
+        query: searchText || '.',
+        type,
+        limit: String(limit),
+      });
+      return openCodeJson<string[]>(`/find/file?${params.toString()}`, { method: 'GET' }, connection, 10000);
+    };
+    const [directories, files] = await Promise.all([searchByType('directory'), searchByType('file')]);
+    directories.forEach((item) => addResult(item, 'directory'));
+    files.forEach((item) => addResult(item, 'file'));
   } catch {
     const rgQuery = searchText.toLowerCase();
     const { stdout } = await execFileAsync('rg', ['--files', '--glob', '!node_modules/**'], {
@@ -2484,17 +2670,27 @@ export async function searchChatFiles(projectId: string, query: { q?: string; li
       timeout: 5000,
       maxBuffer: 1024 * 1024,
     }).catch(() => ({ stdout: '' }));
-    return stdout
+    stdout
       .split(/\r?\n/)
       .map((item) => item.trim().replace(/\\/g, '/'))
-      .filter((item) => item && isChatSearchVisibleFile(item) && (!rgQuery || item.toLowerCase().includes(rgQuery)))
-      .slice(0, limit)
-      .map((item) => ({
-        path: item,
-        name: path.basename(item),
-        mime: mimeForPath(item),
-      }));
+      .filter((item) => item && isChatSearchVisibleReference(item))
+      .forEach((item) => {
+        const directory = path.posix.dirname(item);
+        if (directory && directory !== '.' && (!rgQuery || directory.toLowerCase().includes(rgQuery))) {
+          addResult(directory, 'directory');
+        }
+        if (!rgQuery || item.toLowerCase().includes(rgQuery)) {
+          addResult(item, 'file');
+        }
+      });
   }
+
+  return [...results.values()]
+    .sort((left, right) => {
+      if (left.type !== right.type) return left.type === 'directory' ? -1 : 1;
+      return left.path.localeCompare(right.path);
+    })
+    .slice(0, limit);
 }
 
 type ProjectPathSearchResult = {
@@ -2511,7 +2707,7 @@ function addProjectPathResult(
 ) {
   const absolutePath = resolveProjectPath(project, itemPath);
   const relativePath = toProjectRelative(project, absolutePath).replace(/\\/g, '/');
-  if (!relativePath || relativePath.startsWith('.git/')) return;
+  if (!relativePath || !isChatSearchVisibleReference(relativePath)) return;
   results.set(relativePath, {
     path: relativePath,
     name: path.basename(relativePath),
@@ -2931,28 +3127,33 @@ type ChatStreamEvent =
   | { type: 'tool_activity'; activity: ChatToolActivity }
   | { type: 'permission_prompt'; prompt: ChatPermissionPrompt }
   | { type: 'permission_resolved'; permissionId: string; response: PermissionReply }
-  | { type: 'done'; response: {
-    sessionId: string;
-    openCodeSessionId?: string;
-    userMessage: ChatMessageRecord;
-    assistantMessage: ChatMessageRecord;
-    info: ChatMessageRecord;
-    parts: Array<{ type?: string; text?: string; [key: string]: unknown }>;
-    configChangeId?: string;
-    proposal?: Record<string, unknown>;
-    backup?: ChatTurnBackup;
-    backupError?: ChatTurnBackupFailure;
-  } };
+  | {
+    type: 'done'; response: {
+      sessionId: string;
+      openCodeSessionId?: string;
+      userMessage: ChatMessageRecord;
+      assistantMessage: ChatMessageRecord;
+      info: ChatMessageRecord;
+      parts: Array<{ type?: string; text?: string;[key: string]: unknown }>;
+      configChangeId?: string;
+      proposal?: Record<string, unknown>;
+      backup?: ChatTurnBackup;
+      backupError?: ChatTurnBackupFailure;
+    }
+  };
 
 async function commandOpenCodeSession(project: ProjectRecord, session: ChatSessionRecord, command: string, commandArguments: string, connection?: ServerConnectionRecord, options: ChatRequestOptions = {}) {
   if (!session.openCodeSessionId) {
     throw new ApiError(502, 'OPENCODE_SESSION_FAILED', 'OpenCode did not return a session id.');
   }
 
+  const references = await normalizeChatReferences(project, commandArguments, options);
+  const parts = await buildCommandFileParts(project, references);
   const body: Record<string, unknown> = {
     command,
-    arguments: await buildCommandArguments(project, commandArguments, options),
+    arguments: commandArguments,
   };
+  if (parts.length > 0) body.parts = parts;
   if (options.model ?? session.model) body.model = options.model ?? session.model;
   if (options.agent ?? session.agent) body.agent = options.agent ?? session.agent;
 
@@ -2967,14 +3168,12 @@ async function promptOpenCodeSessionAsync(project: ProjectRecord, session: ChatS
     throw new ApiError(502, 'OPENCODE_SESSION_FAILED', 'OpenCode did not return a session id.');
   }
 
+  const references = await normalizeChatReferences(project, message, options);
   const body: Record<string, unknown> = {
-    parts: await buildPromptParts(project, message, options),
+    prompt: await buildOpenCodePromptFromReferences(project, message, references),
   };
-  const model = parseOpenCodeModel(options.model ?? session.model);
-  if (model) body.model = model;
-  if (options.agent ?? session.agent) body.agent = options.agent ?? session.agent;
 
-  const response = await openCodeFetch(`/session/${encodeURIComponent(session.openCodeSessionId)}/prompt_async`, {
+  const response = await openCodeFetch(openCodeV2PromptPath(project, session.openCodeSessionId), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     signal: options.signal,
@@ -2982,8 +3181,27 @@ async function promptOpenCodeSessionAsync(project: ProjectRecord, session: ChatS
   }, connection, 120000);
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
+    if (shouldFallbackToLegacyPrompt(detail, references)) {
+      const fallbackResponse = await openCodeFetch(openCodeLegacyPromptAsyncPath(project, session.openCodeSessionId), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: options.signal,
+        body: JSON.stringify(await buildLegacyPromptBody(project, session, message, references, options)),
+      }, connection, 120000);
+      if (fallbackResponse.ok) {
+        return;
+      }
+      const fallbackDetail = await fallbackResponse.text().catch(() => '');
+      throw new ApiError(502, 'OPENCODE_CONNECTION_FAILED', `OpenCode request failed with HTTP ${fallbackResponse.status}`, {
+        path: `/session/${session.openCodeSessionId}/prompt_async`,
+        detail: fallbackDetail.slice(0, 2000),
+      });
+    }
+    if (isOpenCodeV2PromptResponseValidationBug(detail)) {
+      throwOpenCodeV2DirectoryReferenceError(session.openCodeSessionId, detail);
+    }
     throw new ApiError(502, 'OPENCODE_CONNECTION_FAILED', `OpenCode request failed with HTTP ${response.status}`, {
-      path: `/session/${session.openCodeSessionId}/prompt_async`,
+      path: `/api/session/${session.openCodeSessionId}/prompt`,
       detail: detail.slice(0, 2000),
     });
   }
@@ -2994,10 +3212,13 @@ async function commandOpenCodeSessionAsync(project: ProjectRecord, session: Chat
     throw new ApiError(502, 'OPENCODE_SESSION_FAILED', 'OpenCode did not return a session id.');
   }
 
+  const references = await normalizeChatReferences(project, commandArguments, options);
+  const parts = await buildCommandFileParts(project, references);
   const body: Record<string, unknown> = {
     command,
-    arguments: await buildCommandArguments(project, commandArguments, options),
+    arguments: commandArguments,
   };
+  if (parts.length > 0) body.parts = parts;
   if (options.model ?? session.model) body.model = options.model ?? session.model;
   if (options.agent ?? session.agent) body.agent = options.agent ?? session.agent;
 
@@ -3039,15 +3260,38 @@ function parseServerSentEvent(block: string) {
   }
 }
 
-async function* readServerSentEvents(response: Response) {
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export const CHAT_STREAM_TIMEOUT_MS: number | null = null;
+
+export async function* readServerSentEvents(response: Response, idlePollMs = 1000) {
   const reader = response.body?.getReader();
   if (!reader) return;
   const decoder = new TextDecoder();
   let buffer = '';
+  let pendingRead = reader.read();
+  let readSettled = false;
 
   try {
     while (true) {
-      const { value, done } = await reader.read();
+      const readResult = await Promise.race([
+        pendingRead.then((result) => ({ type: 'read' as const, result })),
+        sleep(idlePollMs).then(() => ({ type: 'idle' as const })),
+      ]);
+
+      if (readResult.type === 'idle') {
+        yield { type: '__poll' };
+        continue;
+      }
+
+      const { value, done } = readResult.result;
+      readSettled = true;
+      if (!done) {
+        readSettled = false;
+        pendingRead = reader.read();
+      }
       buffer += decoder.decode(value, { stream: !done }).replace(/\r\n/g, '\n');
 
       let separatorIndex = buffer.indexOf('\n\n');
@@ -3065,6 +3309,10 @@ async function* readServerSentEvents(response: Response) {
       }
     }
   } finally {
+    if (!readSettled) {
+      await reader.cancel().catch(() => undefined);
+      await pendingRead.catch(() => undefined);
+    }
     reader.releaseLock();
   }
 }
@@ -3079,6 +3327,12 @@ function eventSessionId(event: { properties?: unknown }) {
   const part = properties.part;
   if (isPlainObject(part) && typeof part.sessionID === 'string') return part.sessionID;
   return undefined;
+}
+
+export function shouldFinishStreamForIdleEvent(event: { type?: string; properties?: unknown }, openCodeSessionId: string) {
+  if (event.type !== 'session.idle') return false;
+  const currentSessionId = eventSessionId(event);
+  return !currentSessionId || currentSessionId === openCodeSessionId;
 }
 
 function openCodeEventErrorMessage(error: unknown) {
@@ -3112,6 +3366,65 @@ function firstInputString(input: Record<string, unknown> | undefined, keys: stri
     if (typeof value === 'string' && value.trim()) return value.trim();
   }
   return '';
+}
+
+function humanizeIdentifier(value: string) {
+  const words = value
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean);
+  if (words.length === 0) return value.trim();
+  return words
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+function compactPromptText(value: string, maxLength = 240) {
+  const compact = value.replace(/\s+/g, ' ').trim();
+  return compact.length > maxLength ? `${compact.slice(0, maxLength - 3)}...` : compact;
+}
+
+function summarizePermissionValue(value: unknown): string {
+  if (typeof value === 'string') return compactPromptText(value);
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) {
+    const primitiveItems = value
+      .map(summarizePermissionValue)
+      .filter(Boolean);
+    if (primitiveItems.length > 0) return compactPromptText(primitiveItems.join(', '));
+  }
+  if (isPlainObject(value) || Array.isArray(value)) {
+    try {
+      return compactPromptText(JSON.stringify(value));
+    } catch {
+      return '';
+    }
+  }
+  return '';
+}
+
+function summarizePermissionRecord(input: Record<string, unknown>, maxEntries = 4) {
+  return Object.entries(input)
+    .map(([key, value]) => {
+      const summary = summarizePermissionValue(value);
+      return summary ? `${key}: ${summary}` : '';
+    })
+    .filter(Boolean)
+    .slice(0, maxEntries)
+    .join('\n');
+}
+
+function permissionPromptDetail(permission: string, patterns: string[], metadata: Record<string, unknown>) {
+  const patternDetail = patterns.map((pattern) => pattern.trim()).filter(Boolean).join('\n');
+  if (patternDetail) return patternDetail;
+  const metadataDetail = summarizePermissionRecord(metadata);
+  return metadataDetail || humanizeIdentifier(permission);
+}
+
+function permissionPromptTitle(permission: string, detail: string) {
+  const label = humanizeIdentifier(permission);
+  const firstDetailLine = compactPromptText(detail.split('\n')[0] ?? '', 120);
+  return firstDetailLine && firstDetailLine !== label ? `${label} ${firstDetailLine}` : label;
 }
 
 function formatToolName(tool: string) {
@@ -3190,9 +3503,13 @@ function toolActivityFromEvent(event: { id?: string; type?: string; properties?:
 }
 
 function permissionPromptFromEvent(event: { properties?: unknown }): ChatPermissionPrompt | null {
-  const properties = eventProperties(event);
-  const id = valueString(properties.id);
-  const sessionId = valueString(properties.sessionID);
+  return permissionPromptFromRecord(eventProperties(event));
+}
+
+export function permissionPromptFromRecord(record: unknown): ChatPermissionPrompt | null {
+  const properties = isPlainObject(record) ? record : {};
+  const id = valueString(properties.id) || valueString(properties.requestID) || valueString(properties.permissionID);
+  const sessionId = valueString(properties.sessionID) || valueString(properties.sessionId);
   const permission = valueString(properties.permission);
   if (!id || !sessionId || !permission) return null;
 
@@ -3200,17 +3517,15 @@ function permissionPromptFromEvent(event: { properties?: unknown }): ChatPermiss
   const patterns = stringArray(properties.patterns);
   const always = stringArray(properties.always);
   const tool = isPlainObject(properties.tool) ? properties.tool : undefined;
-  const target = firstInputString(metadata, ['url', 'filePath', 'path', 'command', 'query', 'name'])
-    || patterns[0]
-    || valueString(metadata.description);
-  const title = [formatToolName(permission), target].filter(Boolean).join(' ');
+  const detail = permissionPromptDetail(permission, patterns, metadata);
+  const title = permissionPromptTitle(permission, detail);
 
   return {
     id,
     sessionId,
     permission,
     title,
-    detail: target || permission,
+    detail,
     patterns,
     metadata,
     ...(tool ? {
@@ -3222,6 +3537,60 @@ function permissionPromptFromEvent(event: { properties?: unknown }): ChatPermiss
     always,
     status: 'pending',
   };
+}
+
+async function listPendingPermissionPrompts(connection: ServerConnectionRecord | undefined, sessionId: string) {
+  const records = await openCodeJson<unknown>('/permission', { method: 'GET' }, connection, 10000)
+    .catch(() => []);
+  return openCodeArray<unknown>(records)
+    .map(permissionPromptFromRecord)
+    .filter((prompt): prompt is ChatPermissionPrompt => !!prompt && prompt.sessionId === sessionId);
+}
+
+function permissionPromptPart(prompt: ChatPermissionPrompt) {
+  return {
+    ...prompt,
+    type: 'permission_prompt',
+    text: prompt.title,
+  };
+}
+
+export function appendPendingPermissionPrompts(messages: ChatMessageRecord[], prompts: ChatPermissionPrompt[]) {
+  if (prompts.length === 0) return messages;
+  const latestAssistantIndex = messages.findLastIndex((message) => message.role === 'assistant');
+  const promptParts = prompts.map(permissionPromptPart);
+
+  if (latestAssistantIndex === -1) {
+    return [
+      ...messages,
+      {
+        id: makeId('msg'),
+        sessionId: prompts[0].sessionId,
+        role: 'assistant' as const,
+        content: '',
+        parts: promptParts,
+        createdAt: now(),
+      },
+    ];
+  }
+
+  return messages.map((message, index) => {
+    if (index !== latestAssistantIndex) return message;
+    const existingPermissionIds = new Set(
+      (message.parts ?? [])
+        .filter((part) => part.type === 'permission_prompt' && typeof part.id === 'string')
+        .map((part) => part.id as string),
+    );
+    const newPromptParts = promptParts.filter((part) => !existingPermissionIds.has(part.id));
+    if (newPromptParts.length === 0) return message;
+    return {
+      ...message,
+      parts: [
+        ...(message.parts ?? [{ type: 'text', text: message.content }]),
+        ...newPromptParts,
+      ],
+    };
+  });
 }
 
 function isPermissionReply(value: string): value is PermissionReply {
@@ -3288,11 +3657,12 @@ export async function* streamChatMessage(projectId: string, sessionId: string, i
 
   const eventAbortController = new AbortController();
   let streamTimedOut = false;
-  const streamTimeoutMs = 180000;
-  const timeout = setTimeout(() => {
-    streamTimedOut = true;
-    eventAbortController.abort();
-  }, streamTimeoutMs);
+  const timeout = CHAT_STREAM_TIMEOUT_MS === null
+    ? undefined
+    : setTimeout(() => {
+      streamTimedOut = true;
+      eventAbortController.abort();
+    }, CHAT_STREAM_TIMEOUT_MS);
   const abortEventStream = () => eventAbortController.abort();
   input.signal?.addEventListener('abort', abortEventStream, { once: true });
 
@@ -3300,6 +3670,7 @@ export async function* streamChatMessage(projectId: string, sessionId: string, i
   let mainText = '';
   let immediateResponse: OpenCodeMessageResponse | null = null;
   let requestError: unknown = null;
+  const emittedPermissionIds = new Set<string>();
 
   try {
     const eventResponse = await openCodeFetch('/event', {
@@ -3327,6 +3698,15 @@ export async function* streamChatMessage(projectId: string, sessionId: string, i
     for await (const event of readServerSentEvents(eventResponse)) {
       if (requestError) throw requestError;
       if (input.signal?.aborted) break;
+      if (event.type === '__poll') {
+        const prompts = await listPendingPermissionPrompts(connection, openCodeSessionId);
+        for (const prompt of prompts) {
+          if (emittedPermissionIds.has(prompt.id)) continue;
+          emittedPermissionIds.add(prompt.id);
+          yield { type: 'permission_prompt', prompt };
+        }
+        continue;
+      }
       const currentSessionId = eventSessionId(event);
       if (currentSessionId && currentSessionId !== openCodeSessionId) continue;
 
@@ -3337,7 +3717,10 @@ export async function* streamChatMessage(projectId: string, sessionId: string, i
 
       if (event.type === 'permission.asked') {
         const prompt = permissionPromptFromEvent(event);
-        if (prompt) yield { type: 'permission_prompt', prompt };
+        if (prompt && !emittedPermissionIds.has(prompt.id)) {
+          emittedPermissionIds.add(prompt.id);
+          yield { type: 'permission_prompt', prompt };
+        }
       }
 
       if (event.type === 'permission.replied') {
@@ -3380,7 +3763,7 @@ export async function* streamChatMessage(projectId: string, sessionId: string, i
         const message = openCodeEventErrorMessage(properties.error) ?? 'OpenCode session failed while streaming.';
         throw new ApiError(502, 'OPENCODE_SESSION_FAILED', message, properties);
       }
-      if (event.type === 'session.idle' && currentSessionId === openCodeSessionId) {
+      if (shouldFinishStreamForIdleEvent(event, openCodeSessionId)) {
         break;
       }
     }
@@ -3399,7 +3782,7 @@ export async function* streamChatMessage(projectId: string, sessionId: string, i
     if (requestError) {
       throw requestError;
     }
-    if (streamTimedOut || isAbortError(error)) {
+    if (streamTimedOut || (CHAT_STREAM_TIMEOUT_MS !== null && isAbortError(error))) {
       throw new ApiError(
         504,
         'OPENCODE_STREAM_TIMEOUT',
@@ -3407,13 +3790,13 @@ export async function* streamChatMessage(projectId: string, sessionId: string, i
         {
           sessionId,
           openCodeSessionId,
-          timeoutMs: streamTimeoutMs,
+          timeoutMs: CHAT_STREAM_TIMEOUT_MS,
         },
       );
     }
     throw error;
   } finally {
-    clearTimeout(timeout);
+    if (timeout) clearTimeout(timeout);
     input.signal?.removeEventListener('abort', abortEventStream);
     eventAbortController.abort();
   }
@@ -3598,6 +3981,12 @@ type SnapshotReviewFile = {
   deletions: number;
 };
 
+type SnapshotReviewRestoreTarget = {
+  sessionId: string;
+  messageId: string;
+  messageCreatedAt: string;
+};
+
 const SNAPSHOT_REVIEW_SESSION_LIMIT = 100;
 const SNAPSHOT_REVIEW_REMOTE_DIFF_LIMIT = 120;
 
@@ -3704,15 +4093,57 @@ export function buildSnapshotReviewCleanupTargets(input: {
   const sessionDiffFiles = uniqueStrings(input.sessionIds)
     .filter((sessionId) => isSafeOpenCodeId(sessionId, 'ses'))
     .map((sessionId) => path.join(sessionDiffRoot, `${sessionId}.json`));
-  const appBackupDirs: string[] = [];
-
   return {
     sessionDiffFiles,
     projectSnapshotDir: input.includeProjectSnapshot && input.projectId.trim()
       ? path.join(openCodeDataDir, 'snapshot', input.projectId)
       : undefined,
-    appBackupDirs,
+    appBackupDirs: [],
   };
+}
+
+export function snapshotReviewRestoreTargets<T extends SnapshotReviewRestoreTarget>(files: T[]) {
+  const targetsBySession = new Map<string, SnapshotReviewRestoreTarget>();
+  for (const file of files) {
+    if (!file.sessionId.trim() || !file.messageId.trim()) continue;
+    const current = targetsBySession.get(file.sessionId);
+    if (!current || file.messageCreatedAt.localeCompare(current.messageCreatedAt) < 0) {
+      targetsBySession.set(file.sessionId, {
+        sessionId: file.sessionId,
+        messageId: file.messageId,
+        messageCreatedAt: file.messageCreatedAt,
+      });
+    }
+  }
+  return [...targetsBySession.values()]
+    .sort((left, right) => left.messageCreatedAt.localeCompare(right.messageCreatedAt));
+}
+
+async function restoreSnapshotReviewTargets(
+  project: ProjectRecord,
+  connection: ServerConnectionRecord | undefined,
+  targets: SnapshotReviewRestoreTarget[],
+) {
+  const restored: SnapshotReviewRestoreTarget[] = [];
+  const failed: Array<SnapshotReviewRestoreTarget & { message: string }> = [];
+  const query = new URLSearchParams({ directory: project.rootPath });
+
+  for (const target of targets) {
+    try {
+      await openCodeJson<unknown>(`/session/${encodeURIComponent(target.sessionId)}/revert?${query.toString()}`, {
+        method: 'POST',
+        body: JSON.stringify({ messageID: target.messageId }),
+      }, connection, 30000);
+      restored.push(target);
+    } catch (error) {
+      failed.push({
+        ...target,
+        message: error instanceof Error ? error.message : 'Unable to restore snapshot message',
+      });
+    }
+  }
+
+  return { restored, failed };
 }
 
 async function resolveOpenCodeDataDirectory(connection: ServerConnectionRecord | undefined) {
@@ -3892,12 +4323,12 @@ export async function clearSnapshotReviewChanges(projectId: string, input: { sna
   const openCodeDataDir = await resolveOpenCodeDataDirectory(connection).catch(() => undefined);
   const cleanup = openCodeDataDir
     ? await cleanupSnapshotReviewArtifacts(buildSnapshotReviewCleanupTargets({
-        openCodeDataDir,
-        projectId: project.id,
-        sessionIds: filesToClear.map((file) => file.sessionId),
-        includeProjectSnapshot: clearsAllVisible,
-        stateDirectory: getStateDirectory(),
-      }))
+      openCodeDataDir,
+      projectId: project.id,
+      sessionIds: filesToClear.map((file) => file.sessionId),
+      includeProjectSnapshot: clearsAllVisible,
+      stateDirectory: getStateDirectory(),
+    }))
     : { deletedPaths: [], missingPaths: [], failedPaths: [{ path: 'opencode:/path', message: 'Unable to resolve OpenCode data directory' }] };
   if (cleanup.failedPaths.length > 0) {
     throw new ApiError(500, 'SNAPSHOT_CLEANUP_FAILED', 'One or more snapshot artifacts could not be deleted', cleanup);
@@ -3935,7 +4366,7 @@ export async function clearSnapshotReviewChanges(projectId: string, input: { sna
   };
 }
 
-export async function backupWorkingTreeChanges(projectId: string, input: { paths?: string[]; snapshotIds?: string[] }) {
+export async function backupWorkingTreeChanges(projectId: string, input: { paths?: string[]; snapshotIds?: string[]; restore?: boolean }) {
   const state = await loadState();
   const project = assertProject(state, projectId);
   const connection = getDefaultServerConnection(state, project);
@@ -3958,13 +4389,16 @@ export async function backupWorkingTreeChanges(projectId: string, input: { paths
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const backupRoot = path.join(getStateDirectory(), 'manual-backups', `snapshot-review-${timestamp}`);
   const currentRoot = path.join(backupRoot, 'current-working-tree');
+  const headRoot = path.join(backupRoot, 'git-head-original');
   const patchRoot = path.join(backupRoot, 'snapshot-patches');
   await fs.mkdir(currentRoot, { recursive: true });
+  await fs.mkdir(headRoot, { recursive: true });
   await fs.mkdir(patchRoot, { recursive: true });
 
   const backups = [];
   for (const file of selectedFiles) {
     const currentBackupPath = await copyWorkingTreeSnapshot(project, file.path, currentRoot);
+    const headBackupPath = await copyHeadSnapshot(project, file.path, headRoot);
     const patchBackupPath = await writeSnapshotReviewPatch(file, patchRoot);
     backups.push({
       id: makeId('bak'),
@@ -3978,14 +4412,21 @@ export async function backupWorkingTreeChanges(projectId: string, input: { paths
       deletions: file.deletions,
       currentBackupPath,
       patchBackupPath,
-      headBackupPath: patchBackupPath,
+      headBackupPath,
     });
   }
+
+  const restore = input.restore
+    ? await restoreSnapshotReviewTargets(project, connection, snapshotReviewRestoreTargets(selectedFiles))
+    : undefined;
 
   await fs.writeFile(path.join(backupRoot, 'README.txt'), [
     'Manual backup created from OpenCode snapshot Review changes.',
     `Created: ${new Date().toISOString()}`,
     `Project: ${project.rootPath}`,
+    input.restore
+      ? `Restore: ${restore?.restored.length ?? 0} message(s) restored, ${restore?.failed.length ?? 0} failed`
+      : 'Restore: not requested',
     '',
     'Files:',
     ...backups.map((backup) => `- ${backup.status} ${backup.filePath} (${backup.sessionId}/${backup.messageId})`),
@@ -4003,6 +4444,7 @@ export async function backupWorkingTreeChanges(projectId: string, input: { paths
       fileCount: backups.length,
       files: backups.map((backup) => backup.filePath),
       snapshotIds: backups.map((backup) => backup.snapshotId),
+      restore,
     },
     createdAt: now(),
   });
@@ -4012,5 +4454,6 @@ export async function backupWorkingTreeChanges(projectId: string, input: { paths
     backupRoot,
     createdAt: now(),
     backups,
+    restore,
   };
 }

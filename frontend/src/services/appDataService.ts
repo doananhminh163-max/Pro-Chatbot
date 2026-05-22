@@ -1,15 +1,5 @@
-import type { AgentDetail, AppState, ChatFileReference, ChatResponse, ChatSession, ChatSessionDetail, ChatSessionExport, ChatStreamEvent, ChatSubmitOptions, CommandItem, ConfigChange, ConfigIntent, ExternalSkillFindResult, GlobalSkillInstallResult, McpInstallResult, McpMarketplaceItem, McpRuntimeCheck, PermissionResponse, ProjectPathReference, SkillDetail, SnapshotReviewClearResult, WorkingTreeBackupResult, WorkingTreeReview } from '../types/appData'
-
-type ApiResponse<T> = {
-  success: boolean
-  data?: T
-  message?: string
-  error?: {
-    code: string
-    message: string
-    details?: unknown
-  }
-}
+import type { AgentDetail, AppState, ChatContextReference, ChatFileReference, ChatResponse, ChatSession, ChatSessionDetail, ChatSessionExport, ChatStreamEvent, ChatSubmitOptions, CommandItem, ConfigChange, ConfigIntent, ExternalSkillFindResult, GlobalSkillInstallResult, McpInstallResult, McpMarketplaceItem, McpRuntimeCheck, PermissionResponse, ProjectPathReference, SkillDetail, SnapshotReviewClearResult, WorkingTreeBackupResult, WorkingTreeReview } from '../types/appData'
+import { readApiResponse, type ApiResponse } from './apiResponse'
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? ''
 
@@ -28,12 +18,7 @@ async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T
     },
   })
 
-  const payload = await response.json() as ApiResponse<T>
-  if (!response.ok || !payload.success || payload.data === undefined) {
-    throw new Error(payload.error?.message ?? payload.message ?? `API request failed: ${response.status}`)
-  }
-
-  return payload.data
+  return readApiResponse<T>(response)
 }
 
 function postJson<T>(path: string, body: unknown) {
@@ -157,8 +142,8 @@ export function reviewWorkingTreeChanges(projectId: string) {
   return apiRequest<WorkingTreeReview>(`/api/projects/${encodeURIComponent(projectId)}/changes/review`)
 }
 
-export function backupWorkingTreeChanges(projectId: string, snapshotIds: string[]) {
-  return postJson<WorkingTreeBackupResult>(`/api/projects/${encodeURIComponent(projectId)}/changes/backup`, { snapshotIds })
+export function backupWorkingTreeChanges(projectId: string, snapshotIds: string[], options: { restore?: boolean } = {}) {
+  return postJson<WorkingTreeBackupResult>(`/api/projects/${encodeURIComponent(projectId)}/changes/backup`, { snapshotIds, ...options })
 }
 
 export function clearSnapshotReviewChanges(projectId: string, snapshotIds?: string[]) {
@@ -352,6 +337,11 @@ export function exportChatSession(projectId: string, sessionId: string) {
 export function searchChatFiles(projectId: string, query: string) {
   const params = new URLSearchParams({ q: query })
   return apiRequest<ChatFileReference[]>(`/api/projects/${encodeURIComponent(projectId)}/chat/files?${params.toString()}`)
+}
+
+export function searchChatReferences(projectId: string, query: string) {
+  const params = new URLSearchParams({ q: query })
+  return apiRequest<ChatContextReference[]>(`/api/projects/${encodeURIComponent(projectId)}/chat/references?${params.toString()}`)
 }
 
 export function sendChatMessage(projectId: string, sessionId: string, message: string, options: ChatSubmitOptions = {}) {

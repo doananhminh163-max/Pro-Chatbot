@@ -1,4 +1,4 @@
-﻿import type { Request, Response } from 'express';
+import type { Request, Response } from 'express';
 import {
   createChatSession,
   deleteChatSession,
@@ -8,6 +8,7 @@ import {
   parseConfigIntent,
   respondChatPermission,
   searchChatFiles,
+  searchChatReferences,
   sendChatMessage,
   streamChatMessage,
   updateChatSession,
@@ -27,6 +28,13 @@ export async function listSessions(req: Request, res: Response) {
 
 export async function files(req: Request, res: Response) {
   ok(res, await searchChatFiles(param(req, 'projectId'), {
+    q: typeof req.query.q === 'string' ? req.query.q : undefined,
+    limit: typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined,
+  }));
+}
+
+export async function references(req: Request, res: Response) {
+  ok(res, await searchChatReferences(param(req, 'projectId'), {
     q: typeof req.query.q === 'string' ? req.query.q : undefined,
     limit: typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined,
   }));

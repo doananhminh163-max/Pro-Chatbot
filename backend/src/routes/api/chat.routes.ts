@@ -1,10 +1,11 @@
-﻿import type { Router } from 'express';
+import type { Router } from 'express';
 import * as chatController from 'controllers/api/chat.controller.js';
 import { asyncHandler } from './shared.js';
 
 export function registerChatRoutes(router: Router) {
   router.post('/chat/config-intents', asyncHandler(chatController.configIntent));
   router.get('/projects/:projectId/chat/files', asyncHandler(chatController.files));
+  router.get('/projects/:projectId/chat/references', asyncHandler(chatController.references));
   router.get('/projects/:projectId/chat/sessions', asyncHandler(chatController.listSessions));
   router.post('/projects/:projectId/chat/sessions', asyncHandler(chatController.createSession));
   router.get('/projects/:projectId/chat/sessions/:sessionId', asyncHandler(chatController.sessionDetail));

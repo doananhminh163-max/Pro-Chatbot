@@ -1,8 +1,9 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
 import type { ChatMessage, ChatMessagePart, ChatPermissionPrompt, ChatToolActivity, ChatTurnBackup, PermissionResponse } from '../../types/appData'
 import type { TableAlignment } from './markdown'
 import { parseMarkdown } from './markdown'
+import { firstPendingPermissionPromptId, visibleRuntimeParts, type ChatRuntimePart } from './runtimeEvents'
 
 function objectValue(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
@@ -320,21 +321,25 @@ function ChatBackupNotice({ backup }: { backup: ChatTurnBackup }) {
 
 function ChatRuntimeEvents({
   message,
+  parts,
+  activePermissionPromptId,
   onRespondPermission,
 }: {
   message: ChatMessage
+  parts: ChatRuntimePart[]
+  activePermissionPromptId: string | null
   onRespondPermission?: (prompt: ChatPermissionPrompt, response: PermissionResponse) => void
 }) {
-  const parts = runtimeParts(message)
+  const visibleParts = visibleRuntimeParts(parts, activePermissionPromptId)
   const backups = chatBackups(message)
-  if (parts.length === 0 && backups.length === 0) return null
+  if (visibleParts.length === 0 && backups.length === 0) return null
 
   return (
     <div className="chat-runtime-events" aria-label="OpenCode runtime events">
       {backups.map((backup) => (
         <ChatBackupNotice key={`backup-${backup.messageId}-${backup.backupRoot}`} backup={backup} />
       ))}
-      {parts.map((part) => (
+      {visibleParts.map((part) => (
         'permission' in part
           ? <PermissionPromptCard key={`permission-${part.id}`} prompt={part} onRespondPermission={onRespondPermission} />
           : <RuntimeToolLine key={`tool-${part.callId}`} activity={part} />
@@ -345,9 +350,13 @@ function ChatRuntimeEvents({
 
 function AssistantMessage({
   message,
+  runtimeEventParts,
+  activePermissionPromptId,
   onRespondPermission,
 }: {
   message: ChatMessage
+  runtimeEventParts: ChatRuntimePart[]
+  activePermissionPromptId: string | null
   onRespondPermission?: (prompt: ChatPermissionPrompt, response: PermissionResponse) => void
 }) {
   const thinkingLines = reasoningLines(message)
@@ -365,7 +374,12 @@ function AssistantMessage({
       )}
       <div className="chat-main-message">
         <MarkdownMessageText text={mainText} streaming={message.streaming} />
-        <ChatRuntimeEvents message={message} onRespondPermission={onRespondPermission} />
+        <ChatRuntimeEvents
+          message={message}
+          parts={runtimeEventParts}
+          activePermissionPromptId={activePermissionPromptId}
+          onRespondPermission={onRespondPermission}
+        />
       </div>
     </article>
   )
@@ -391,6 +405,11 @@ export function ChatThread({
   const threadRef = useRef<HTMLDivElement | null>(null)
   const latestMessageRef = useRef<HTMLDivElement | null>(null)
   const hasStreamingMessage = messages.some((message) => message.streaming)
+  const runtimePartsByMessage = useMemo(() => messages.map(runtimeParts), [messages])
+  const activePermissionPromptId = useMemo(
+    () => firstPendingPermissionPromptId(runtimePartsByMessage),
+    [runtimePartsByMessage],
+  )
 
   useEffect(() => {
     latestMessageRef.current?.scrollIntoView({
@@ -404,7 +423,14 @@ export function ChatThread({
       {messages.map((message, index) => (
         <div className="chat-thread-item" key={message.id} ref={index === messages.length - 1 ? latestMessageRef : undefined}>
           {message.role === 'assistant'
-            ? <AssistantMessage message={message} onRespondPermission={onRespondPermission} />
+            ? (
+              <AssistantMessage
+                message={message}
+                runtimeEventParts={runtimePartsByMessage[index] ?? []}
+                activePermissionPromptId={activePermissionPromptId}
+                onRespondPermission={onRespondPermission}
+              />
+            )
             : <UserMessage message={message} />}
         </div>
       ))}

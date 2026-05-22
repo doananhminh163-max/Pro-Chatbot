@@ -1,9 +1,10 @@
 import os from 'node:os';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { getDefaultOpenCodeBaseUrl, openCodeJson } from './runtime.js';
 import { ApiError } from './errors.js';
 import type { AppStateStore, ProjectRecord, ServerConnectionRecord } from './types.js';
-import { now, pathExists, resolveWorkspaceRoot, stableId } from './utils.js';
+import { getStateDirectory, now, pathExists, resolveWorkspaceRoot, stableId, writeAtomic } from './utils.js';
 
 type OpenCodeProjectResponse = {
   id?: string;
@@ -21,6 +22,7 @@ type VolatileState = Pick<
 >;
 
 const VERSION = 1;
+const SNAPSHOT_REVIEW_DISMISSALS_FILE = 'snapshot-review-dismissals.json';
 
 const volatileState: VolatileState = {
   configChanges: [],
@@ -38,6 +40,7 @@ export function getDefaultServerConnection(state: AppStateStore, project: Projec
 
 export async function loadState(root = resolveWorkspaceRoot()): Promise<AppStateStore> {
   const project = await buildProjectRecord(root);
+  const durableSnapshotDismissals = await readSnapshotReviewDismissals(root);
   return {
     version: VERSION,
     projects: [project],
@@ -46,7 +49,10 @@ export async function loadState(root = resolveWorkspaceRoot()): Promise<AppState
     backups: [...volatileState.backups],
     marketplaceSkills: [...volatileState.marketplaceSkills],
     skillOverrides: { ...volatileState.skillOverrides },
-    snapshotReviewDismissals: cloneSnapshotReviewDismissals(volatileState.snapshotReviewDismissals),
+    snapshotReviewDismissals: mergeSnapshotReviewDismissals(
+      durableSnapshotDismissals,
+      volatileState.snapshotReviewDismissals,
+    ),
     chatSessions: [],
     chatMessages: [],
     auditLogs: [...volatileState.auditLogs],
@@ -59,6 +65,7 @@ export async function saveState(state: AppStateStore) {
   volatileState.marketplaceSkills = uniqueBy(state.marketplaceSkills, (skill) => skill.id);
   volatileState.skillOverrides = sanitizeSkillOverrides(state.skillOverrides);
   volatileState.snapshotReviewDismissals = sanitizeSnapshotReviewDismissals(state.snapshotReviewDismissals);
+  await writeSnapshotReviewDismissals(volatileState.snapshotReviewDismissals);
   volatileState.auditLogs = uniqueBy(state.auditLogs, (log) => log.id);
 }
 
@@ -182,5 +189,41 @@ function sanitizeSnapshotReviewDismissals(dismissals: AppStateStore['snapshotRev
         projectId,
         Array.from(new Set((snapshotIds ?? []).filter((snapshotId) => typeof snapshotId === 'string' && snapshotId.trim()))),
       ]),
+  );
+}
+
+function snapshotReviewDismissalsPath(root = resolveWorkspaceRoot()) {
+  return path.join(getStateDirectory(root), SNAPSHOT_REVIEW_DISMISSALS_FILE);
+}
+
+function mergeSnapshotReviewDismissals(
+  first: AppStateStore['snapshotReviewDismissals'],
+  second: AppStateStore['snapshotReviewDismissals'],
+) {
+  const merged: AppStateStore['snapshotReviewDismissals'] = {};
+  for (const dismissals of [first, second]) {
+    for (const [projectId, snapshotIds] of Object.entries(dismissals ?? {})) {
+      merged[projectId] = Array.from(new Set([...(merged[projectId] ?? []), ...snapshotIds]));
+    }
+  }
+  return sanitizeSnapshotReviewDismissals(merged);
+}
+
+export async function readSnapshotReviewDismissals(root = resolveWorkspaceRoot()) {
+  try {
+    const raw = await fs.readFile(snapshotReviewDismissalsPath(root), 'utf8');
+    return sanitizeSnapshotReviewDismissals(JSON.parse(raw) as AppStateStore['snapshotReviewDismissals']);
+  } catch {
+    return {};
+  }
+}
+
+export async function writeSnapshotReviewDismissals(
+  dismissals: AppStateStore['snapshotReviewDismissals'],
+  root = resolveWorkspaceRoot(),
+) {
+  await writeAtomic(
+    snapshotReviewDismissalsPath(root),
+    `${JSON.stringify(sanitizeSnapshotReviewDismissals(dismissals), null, 2)}\n`,
   );
 }

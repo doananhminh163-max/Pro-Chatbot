@@ -645,16 +645,16 @@ async function collectOpenCodeCommands(): Promise<CommandItem[]> {
     await ensureOpenCodeServer();
     const body = await openCodeJson<Array<Record<string, unknown>>>('/command', { method: 'GET' }, undefined, 10000);
     return body
-      .filter((command) => command.source === 'command')
       .flatMap<CommandItem>((command) => {
-        const name = typeof command.name === 'string' ? command.name : '';
+        const name = typeof command.name === 'string' ? command.name.trim() : '';
         if (!name) return [];
+        const source = typeof command.source === 'string' && command.source.trim() ? command.source.trim() : 'command';
         return [{
           name,
           description: typeof command.description === 'string' ? command.description : 'OpenCode command.',
-          sourcePath: `command:/${name}`,
+          sourcePath: `${source}:/${name}`,
           preview: typeof command.template === 'string' ? command.template.slice(0, 1200) : '',
-          source: 'command',
+          source,
           builtIn: true,
           agent: typeof command.agent === 'string' ? command.agent : undefined,
           model: typeof command.model === 'string' ? command.model : undefined,

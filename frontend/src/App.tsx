@@ -16,7 +16,7 @@ import {
   previewPermissionUpdate,
   reviewWorkingTreeChanges,
   respondChatPermission,
-  searchChatFiles,
+  searchChatReferences,
   sendChatMessage,
   streamChatMessage as streamChatMessageApi,
 } from './services/appDataService'
@@ -131,8 +131,14 @@ export function App() {
     }
     setChangeReviewError(null)
     try {
-      const result = await backupWorkingTreeChanges(projectId, snapshotIds)
+      const result = await backupWorkingTreeChanges(projectId, snapshotIds, { restore: true })
       setChangeBackupResult(result)
+      if (result.restore?.failed.length) {
+        setChangeReviewError(`Backup created, but ${result.restore.failed.length} snapshot restore(s) failed.`)
+        await refresh()
+        await loadChangeReview()
+        return
+      }
       await clearSnapshotReviewChanges(projectId, snapshotIds)
       await refresh()
       await loadChangeReview()
@@ -295,6 +301,9 @@ export function App() {
       model: options.model,
       skills: options.skills,
     })).id
+    if (!sessionId) {
+      navigate(chatSessionPath(activeSessionId), { replace: true })
+    }
     const response = await streamChatMessageApi(projectId, activeSessionId, message, options, onEvent, signal)
     if (response.backupError) {
       setActionError(`Chat completed, but backup failed: ${response.backupError.message}`)
@@ -311,7 +320,7 @@ export function App() {
       setActionError(caughtError instanceof Error ? caughtError.message : 'Unable to refresh app state')
     })
     return response
-  }, [projectId, refresh])
+  }, [navigate, projectId, refresh])
 
   const handleRespondChatPermission = useCallback(async (sessionId: string, permissionId: string, response: PermissionResponse) => {
     if (!projectId) {
@@ -397,7 +406,7 @@ export function App() {
               onSubmitMessage={actions.submitChatMessage}
               onStreamMessage={handleStreamChatMessage}
               onRespondPermission={handleRespondChatPermission}
-              onSearchFiles={(query) => projectId ? searchChatFiles(projectId, query) : Promise.resolve([])}
+              onSearchReferences={(query) => projectId ? searchChatReferences(projectId, query) : Promise.resolve([])}
               models={data?.models ?? []}
               agents={data?.agents ?? []}
               commands={data?.commands ?? []}

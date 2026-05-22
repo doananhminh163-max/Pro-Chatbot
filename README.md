@@ -4,7 +4,7 @@ A full-stack web application for managing and controlling OpenCode through an in
 
 ## Features
 
-- **Chat Interface** - Interact with OpenCode runtime with streaming support, model/agent selection, slash commands, and file references (`@path`)
+- **Chat Interface** - Interact with OpenCode runtime with streaming support, model/agent selection, native slash commands/skills, and file or folder references (`@path`)
 - **Configuration Management** - Preview configuration changes as diffs before applying them safely with automatic backups
 - **Agent Management** - View, create, edit, and set default agents for your workspace
 - **Skills Marketplace** - Browse, install, and manage skills from the OpenCode marketplace
@@ -164,9 +164,9 @@ User confirms → changes written to disk with automatic backup
 ## Chat Workflow
 
 1. User opens `/chat` and selects a model/agent
-2. User can reference files with `@path/to/file` syntax
+2. User can reference files or folders with `@path/to/file` or `@path/to/folder` syntax
 3. If no session exists, system creates an OpenCode session
-4. Message is sent with file contents resolved as context
+4. Message is sent with OpenCode-native file attachments and local folder references
 5. OpenCode processes the request and returns response parts
 6. If message appears to request config changes, system creates a proposal with `configChangeId`
 

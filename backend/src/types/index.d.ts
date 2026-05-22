@@ -1,6 +1,12 @@
-import { CartDetail as PrismaCartDetail, Product as PrismaProduct, Role, User as PrismaUser, Cart as PrismaCart } from "@prisma/client";
-
 declare global {
     namespace Express {
+        interface User {
+            id: string;
+            username?: string;
+            email?: string;
+            role?: {
+                name: string;
+            };
+        }
     }
 }

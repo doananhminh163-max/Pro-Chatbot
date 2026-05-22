@@ -1,146 +1,233 @@
-# Pro Chatbot
+# Report Analyzing
 
-Ứng dụng full-stack hỗ trợ trò chuyện với AI qua CLI, quản lý tài liệu cá nhân và lưu lịch sử hội thoại theo phiên. Dự án được tổ chức theo mô hình `backend` + `frontend`, dùng SQLite/Prisma để lưu metadata và dùng filesystem để lưu tệp người dùng.
+A full-stack web application for managing and controlling OpenCode through an intuitive interface. Chat with OpenCode runtime, view workspace state, manage agents, permissions, skills, MCP servers, and apply configuration changes through a safe preview → review → apply workflow.
 
-## 1. Mục tiêu dự án
+## Features
 
-Hệ thống này được xây để:
+- **Chat Interface** - Interact with OpenCode runtime with streaming support, model/agent selection, slash commands, and file references (`@path`)
+- **Configuration Management** - Preview configuration changes as diffs before applying them safely with automatic backups
+- **Agent Management** - View, create, edit, and set default agents for your workspace
+- **Skills Marketplace** - Browse, install, and manage skills from the OpenCode marketplace
+- **MCP Server Management** - Configure and manage Model Context Protocol servers
+- **Session Management** - Create, track, and export OpenCode chat sessions
+- **Health & Monitoring** - Real-time workspace state aggregation and risk assessment
+- **Safe Preview/Apply Flow** - Risk classification, automatic backups, and rollback capabilities
 
-- cung cấp giao diện chat cho người dùng cuối;
-- cho phép đính kèm tài liệu vào từng phiên làm việc với AI;
-- cá nhân hóa cách AI phản hồi theo hồ sơ người dùng;
-- quản lý lịch sử phiên chat, tài liệu và tài khoản trên cùng một workspace.
+## Quick Start
 
-## 2. Trạng thái triển khai hiện tại
+### Prerequisites
 
-### Đã kết nối backend thật
+- Node.js 18+ and npm
+- OpenCode CLI installed globally
 
-- Đăng ký, đăng nhập, đăng xuất bằng JWT cookie.
-- Đăng nhập Google OAuth.
-- Quên mật khẩu và đặt lại mật khẩu qua email SMTP.
-- Hồ sơ người dùng và cá nhân hóa AI.
-- Upload, preview, download, xóa tài liệu.
-- Tạo phiên chat, gửi tin nhắn, xem lịch sử, đổi tên phiên, xóa phiên.
-- Lấy danh sách provider/model/agent từ database để đổ vào cấu hình chat.
-- Memory engine chỉ dùng `global memory`, có thể bật/tắt ngay trong màn chat + Memory page để xem/xóa dữ liệu memory toàn cục.
-
-### Mới ở mức scaffold hoặc dữ liệu mẫu
-
-- Dashboard client đang hiển thị số liệu mock.
-- Settings page mới điều khiển theme ở frontend; các tùy chọn khác chưa lưu thật.
-- Toàn bộ Admin Console hiện là giao diện quản trị mẫu, chưa gọi API CRUD thật.
-- `Document.extractedText` hiện được populate bằng Markdown extract thật từ `xlsx/csv/pdf/docx/image/text` trước khi file được đưa vào sandbox.
-- Logic fallback provider chưa được hiện thực dù UI và metadata đã chừa chỗ.
-
-## 3. Kiến trúc công nghệ
-
-- Frontend: React 19, Vite, TypeScript, Material UI, SCSS, React Router.
-- Backend: Node.js, Express 5, TypeScript.
-- Database: SQLite + Prisma ORM.
-- Authentication: JWT trong cookie HttpOnly + Google OAuth.
-- Email: Nodemailer qua SMTP.
-- File storage: filesystem cục bộ theo cây thư mục người dùng/phiên.
-- AI execution: gọi CLI ngoài qua `spawn`, bọc PowerShell trên Windows.
-
-## 4. Cấu trúc thư mục
-
-```text
-report_analizing/
-├── backend/                # API server, Prisma schema, seed, services
-├── frontend/               # SPA React + Vite
-├── docs/                   # Tài liệu dự án
-├── AGENTS.md               # Ngữ cảnh hướng dẫn tổng hợp cho AI agent
-├── package.json            # Scripts chạy toàn dự án
-└── README.md               # Tài liệu vào cửa của dự án
-```
-
-## 5. Cách chạy nhanh
-
-### Bước 1: cài dependency
+### Installation
 
 ```bash
 npm run install:all
 ```
 
-### Bước 2: cấu hình backend
+### Configuration
 
-Tạo file `backend/.env` từ `backend/.env.example` rồi điền đầy đủ biến môi trường bắt buộc.
+Create a `backend/.env` file if needed (copy from `backend/.env.example`):
 
-Lưu ý quan trọng:
-
-- `backend/src/config/env.ts` đang đọc hầu hết biến môi trường ở chế độ bắt buộc.
-- Dù chưa dùng Google OAuth hoặc SMTP ngay, bạn vẫn phải khai báo giá trị cho các biến liên quan để backend khởi động.
-- `USER_DOCS_ROOT` cần trỏ tới vùng lưu trữ thật của tài liệu người dùng, ví dụ `D:\Projects\user_docs\store`.
-- `SANDBOX_ROOT` cần trỏ tới vùng làm việc tạm của broker, ví dụ `D:\Projects\user_docs\sandbox`.
-- Không cấu hình `SANDBOX_ROOT` trỏ vào cùng cây thư mục với `USER_DOCS_ROOT`.
-
-### Bước 3: generate Prisma client
-
-```bash
-npm run prisma:generate
+```env
+PORT=8080
+PROJECT_ROOT=/path/to/workspace  # optional, defaults to repo root
 ```
 
-### Bước 4: chạy đồng thời frontend + backend
+> **Note:** OpenCode server configuration (host, port, CORS) is read from `opencode.json`, not from `.env`.
+
+### Start Development
 
 ```bash
 npm run dev
 ```
 
-Frontend mặc định chạy tại `http://localhost:5173`, backend tại `http://localhost:8080`.
+This command starts three processes concurrently:
+- **OpenCode Server** - Listens on `opencode.json` configured port (default: 4097)
+- **Backend API** - Runs on `http://localhost:8080`
+- **Frontend UI** - Runs on `http://localhost:5173`
 
-## 6. Luồng nghiệp vụ quan trọng
+The frontend automatically proxies API calls to the backend.
 
-### Upload tài liệu
+### Individual Development Servers
 
-1. Frontend gửi `multipart/form-data` tới `/api/documents/upload`.
-2. Backend lưu tệp vật lý vào `USER_DOCS_ROOT/<userId>` hoặc `USER_DOCS_ROOT/<userId>/<sessionId>`.
-3. Backend extract nội dung sang Markdown (`xlsx`, `csv`, `pdf`, `docx`, `image`, `text`) và lưu vào `Document.extractedText`.
-4. Backend ghi metadata vào bảng `Document`.
+```bash
+npm run dev:frontend   # Frontend only (Vite)
+npm run dev:backend    # Backend only (Express)
+npm run dev:opencode   # OpenCode server only
+npm run kill           # Kill any process on port 8080
+```
 
-### Gửi tin nhắn chat
+## Architecture
 
-1. Frontend có thể upload trước các file đính kèm.
-2. Backend tạo hoặc tìm `ChatSession`.
-3. Nếu file đang ở thư mục gốc người dùng, backend sẽ di chuyển vật lý vào thư mục của session.
-4. Backend tạo `Message` của người dùng và gắn `Document` vào message đó.
-5. Mỗi prompt text bị giới hạn `<= 2000` ký tự; nếu dài hơn thì người dùng phải gửi file `<= 20MB`.
-6. Mỗi session chỉ nhận tối đa `50` tin nhắn từ phía người dùng; vượt ngưỡng thì backend lưu `SYSTEM` message yêu cầu mở session mới.
-7. Backend nạp `global memory` nếu người dùng bật Memory cho lượt chat đó.
-8. Backend dựng prompt từ tối đa 50 tin nhắn gần nhất của người dùng + personalization + global memory.
-9. Backend tạo file Markdown cho từng attachment trong `SANDBOX_ROOT/jobs/<jobId>/input` và tạo `attachments-context.txt` từ chính các file `.md` đó.
-10. Backend gọi sandbox broker nội bộ, broker chỉ làm việc với các Markdown artifact trong workspace tạm đó.
-11. Backend nhận kết quả, lưu phản hồi thành `Message`, rồi chạy bước memory extraction để cập nhật `global memory`.
+### Stack
 
-### Xóa session
+| Component | Technology |
+|-----------|-----------|
+| **Frontend** | React 19, Vite, TypeScript, Material-UI, SASS |
+| **Backend** | Node.js, Express 5, TypeScript |
+| **Runtime** | OpenCode API Server (source of truth) |
+| **Storage** | Local filesystem (`opencode.json`, `.opencode/*`, `.agents/*`) |
 
-1. Backend xóa thư mục vật lý của session trong `USER_DOCS_ROOT`.
-2. Sau đó xóa bản ghi `ChatSession`.
-3. Nhờ `onDelete: Cascade`, toàn bộ `Message` liên quan cũng bị xóa.
+### Directory Structure
 
-## 7. Dữ liệu seed
+```
+report_analizing/
+├── backend/                # Express API server
+│   ├── src/
+│   │   ├── app.ts         # App bootstrapping
+│   │   ├── routes/        # REST endpoints
+│   │   └── services/      # Business logic
+│   └── .env.example       # Environment template
+├── frontend/              # React + Vite SPA
+│   ├── src/
+│   │   ├── App.tsx        # Main component
+│   │   ├── pages/         # Page components
+│   │   ├── services/      # API client
+│   │   └── types/         # TypeScript types
+│   └── vite.config.ts     # Vite configuration
+├── docs/                  # Project documentation
+├── AGENTS.md              # AI agent runbook
+├── opencode.json          # OpenCode server config
+└── package.json           # Root scripts
+```
 
-Khi chạy `npm --prefix backend run dev`, backend sẽ seed:
+## API Overview
 
-- Provider: `gemini`
-- Models Gemini mặc định
-- Agents: `report-strategist`, `debug-operator`, `meeting-brief`
+All API responses follow a consistent envelope:
 
-Seed hiện không tạo sẵn tài khoản admin hoặc user mẫu.
+### Success Response
+```json
+{
+  "success": true,
+  "data": { /* response data */ },
+  "meta": { /* optional metadata */ }
+}
+```
 
-## 8. Tài liệu chi tiết
+### Error Response
+```json
+{
+  "success": false,
+  "error": "Error message",
+  "meta": { /* optional details */ }
+}
+```
 
-- [docs/OVERVIEW.md](./docs/OVERVIEW.md)
-- [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
-- [docs/DATABASE.md](./docs/DATABASE.md)
-- [docs/API.md](./docs/API.md)
-- [docs/UI_DESIGN.md](./docs/UI_DESIGN.md)
-- [docs/SETUP.md](./docs/SETUP.md)
-- [docs/SANDBOX_BROKER_SPEC.md](./docs/SANDBOX_BROKER_SPEC.md)
+### Key Endpoints
 
-## 9. Ghi chú kỹ thuật cần biết
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/health` | Health check |
+| `GET` | `/api/app-state` | Complete workspace state |
+| `POST` | `/api/projects/:id/chat/sessions` | Create chat session |
+| `POST` | `/api/projects/:id/chat/sessions/:sid/messages` | Send message |
+| `POST` | `/api/config/preview` | Preview configuration changes |
+| `POST` | `/api/config/apply` | Apply reviewed changes |
 
-- Backend hiện dùng mô hình `main backend` + `sandbox broker` nội bộ cho thực thi CLI.
-- Tài liệu thật của người dùng phải nằm trong `USER_DOCS_ROOT` và tách biệt khỏi `SANDBOX_ROOT`.
-- Broker chỉ nên được cấp quyền trên `SANDBOX_ROOT`, không trên `USER_DOCS_ROOT`.
-- API chat chấp nhận `provider: gemini | opencode`, nhưng seed mặc định chỉ có `gemini`.
-- Trên giao diện, nhiều màn admin dùng dữ liệu cứng để mô phỏng tương lai, không phản ánh dữ liệu thật từ database.
+See [docs/API_SPEC.md](./docs/API_SPEC.md) for the complete API reference.
+
+## Configuration Changes
+
+The application uses a safe three-step workflow for making configuration changes:
+
+### 1. **Preview**
+User initiates a change → system generates a diff and assesses risk level
+
+### 2. **Review**
+Display the proposed changes with risk classification:
+- **Low**: Safe changes (e.g., adding whitespace)
+- **Medium**: Notable changes (e.g., agent updates)
+- **High/Critical**: Requires user confirmation (e.g., permission modifications)
+
+### 3. **Apply**
+User confirms → changes written to disk with automatic backup
+
+## Important Notes
+
+### In-Memory State
+- Preview/apply metadata, backup index, skill cache, and audit logs are stored in memory
+- **After backend restart**: Recreate proposals before applying
+- Actual backup files remain on disk under `.pro-chatbot/backups/`
+
+### Limitations
+- No local database; OpenCode API server is the single source of truth
+- Project creation/deletion and server connections are managed outside this UI
+- Natural language intent parsing uses keyword heuristics (not AI planner)
+
+### Safety Constraints
+- All file operations use the preview/apply flow (except command create/delete)
+- Secrets are never logged or displayed in plain text
+- Configuration backups are automatically created before any apply operation
+
+## Chat Workflow
+
+1. User opens `/chat` and selects a model/agent
+2. User can reference files with `@path/to/file` syntax
+3. If no session exists, system creates an OpenCode session
+4. Message is sent with file contents resolved as context
+5. OpenCode processes the request and returns response parts
+6. If message appears to request config changes, system creates a proposal with `configChangeId`
+
+## Development Guide
+
+### Adding a New Endpoint
+
+1. Add route handler in `backend/src/routes/api.ts`
+2. Implement service logic in `backend/src/services/opencode-control.service.ts`
+3. Return proper envelope and status code
+4. If used by frontend: add API client function in `frontend/src/services/appDataService.ts`
+5. Update types in `frontend/src/types/appData.ts` if needed
+
+### Working Rules
+
+- Keep changes targeted and small
+- Test full user flow: click → API → UI render
+- Preserve the safe preview/apply workflow for risky operations
+- Never commit plaintext secrets
+- Update documentation when behavior changes
+
+## Documentation
+
+- [OVERVIEW.md](./docs/OVERVIEW.md) - Project goals and scope
+- [SPEC.md](./docs/SPEC.md) - Detailed specifications
+- [ARCHITECTURE.md](./docs/ARCHITECTURE.md) - Technical architecture
+- [API_SPEC.md](./docs/API_SPEC.md) - API contract
+- [UI_UX.md](./docs/UI_UX.md) - UI/UX guidelines
+- [AGENTS.md](./AGENTS.md) - AI agent runbook
+
+## Testing
+
+Health check:
+```bash
+curl http://localhost:8080/api/health
+```
+
+Get workspace state:
+```bash
+curl http://localhost:8080/api/app-state
+```
+
+## Troubleshooting
+
+### Backend won't start
+- Check if port 8080 is already in use: `npm run kill`
+- Verify OpenCode server is running or can be started
+
+### OpenCode server connection fails
+- Ensure `opencode.json` has correct `server.hostname` and `server.port`
+- Check if OpenCode server is running: `opencode serve`
+
+### Frontend API calls fail
+- Verify backend is running on `http://localhost:8080`
+- Check browser console for CORS errors
+- Confirm `vite.config.ts` proxy settings
+
+## License
+
+ISC
+
+---
+
+**Built with TypeScript, Express, React, and OpenCode**

@@ -1,49 +1,49 @@
 import { Strategy } from "passport-local";
 import passport from "passport";
-import { prisma } from "config/prisma.config.js";
-import bcrypt from 'bcrypt';
-import * as adminUser from "services/admin/user.service.js";
+import bcrypt from "bcrypt";
 
 const configPassport = () => {
     passport.use(new Strategy({
         usernameField: 'identifier',
         passwordField: 'password'
     }, async function verify(identifier, password, callback) {
-        const user: Express.User = await prisma.user.findFirst({
-            where: {
-                OR: [
-                    { email: identifier },
-                    { username: identifier }
-                ]
-            },
-        });
+        const expectedUser = process.env.LOCAL_ADMIN_USERNAME;
+        const expectedPasswordHash = process.env.LOCAL_ADMIN_PASSWORD_HASH;
 
-        if (!user) {
+        if (!expectedUser || !expectedPasswordHash || identifier !== expectedUser) {
             return callback(null, false, { message: `${identifier} not found` });
         }
 
-        const isMatch = await bcrypt.compare(password, user.password);
-
-        if (!isMatch) {
-            return callback(null, false, { message: 'Invalid password' });
+        try {
+            const isPasswordValid = await bcrypt.compare(password, expectedPasswordHash);
+            if (!isPasswordValid) {
+                return callback(null, false, { message: 'Invalid password' });
+            }
+        } catch (err) {
+            return callback(err);
         }
 
-        return callback(null, user);
+        return callback(null, {
+            id: "local-admin",
+            username: expectedUser,
+            email: `${expectedUser}@local`,
+            role: { name: "Admin" },
+        });
     }));
 
     passport.serializeUser(function (user: Express.User, callback) {
         process.nextTick(function () {
-            callback(null, user.id);
+            callback(null, (user as Express.User & { id: string }).id);
         });
     });
 
-    passport.deserializeUser(async function (id: number, callback) {
-        try {
-            const user: Express.User = await adminUser.getUserByIdService(String(id));
-            callback(null, user);
-        } catch (err) {
-            callback(err);
-        }
+    passport.deserializeUser(async function (id: string, callback) {
+        callback(null, {
+            id,
+            username: process.env.LOCAL_ADMIN_USERNAME ?? "local-admin",
+            email: `${process.env.LOCAL_ADMIN_USERNAME ?? "local-admin"}@local`,
+            role: { name: "Admin" },
+        });
     });
 }
 

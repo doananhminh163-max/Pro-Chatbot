@@ -1,15 +1,35 @@
 import express from "express";
 import 'dotenv/config'
-import activateWebRoutes from "routes/web.js";
-import initDatabase from "config/seed.js";
 import passport from "passport";
 import session from "express-session";
+import { randomBytes } from "node:crypto";
 import configPassport from "middleware/passport.local.js";
-import { PrismaSessionStore } from "@quixo3/prisma-session-store";
-import { prisma } from "config/prisma.config.js";
+import activateApiRoutes from "routes/api.js";
+import activateWebRoutes from "routes/web.js";
 
 const app = express();
-const PORT = process.env.PORT;
+const PORT = process.env.PORT ?? 8080;
+const SESSION_SECRET = process.env.SESSION_SECRET ?? randomBytes(32).toString("hex");
+
+app.use((req, res, next) => {
+    const allowedOrigins = new Set([
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]);
+    const origin = req.headers.origin;
+    if (origin && allowedOrigins.has(origin)) {
+        res.header("Access-Control-Allow-Origin", origin);
+        res.header("Vary", "Origin");
+    }
+    res.header("Access-Control-Allow-Credentials", "true");
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+    if (req.method === "OPTIONS") {
+        res.sendStatus(204);
+        return;
+    }
+    next();
+});
 
 // config view engine
 app.set('view engine', 'ejs');
@@ -22,25 +42,21 @@ app.use(express.urlencoded({ extended: true }));
 // config static files
 app.use(express.static('public'));
 
-//config session
+// config login session support for Passport
 app.use(session({
+    name: "report_analizing.sid",
+    secret: SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
     cookie: {
-        maxAge: 1000 * 60 * 60 * 24 * 7
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        maxAge: 1000 * 60 * 60 * 24 * 7,
     },
-    secret: "hello world",
-    resave: true,
-    saveUninitialized: true,
-    store: new PrismaSessionStore(
-        prisma,
-        {
-            checkPeriod: 2 * 60 * 1000,
-            dbRecordIdIsSessionId: true,
-            dbRecordIdFunction: undefined,
-        }
-    )
 }));
 
-// config passport
+// config passport authentication
 configPassport();
 app.use(passport.initialize());
 app.use(passport.session());
@@ -51,9 +67,7 @@ app.use(async (req, res, next) => {
     next();
 });
 
-// init database
-initDatabase()
-
+activateApiRoutes(app);
 activateWebRoutes(app);
 
 const server = app.listen(PORT, () => {

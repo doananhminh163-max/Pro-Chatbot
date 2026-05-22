@@ -8,6 +8,7 @@
         "rootDir": "./src",
         "outDir": "./dist",
         "skipLibCheck": true,
+        "ignoreDeprecations": "6.0",
         "baseUrl": ".",
         "paths": {
             "config/*": [

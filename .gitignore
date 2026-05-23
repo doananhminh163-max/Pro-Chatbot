@@ -19,6 +19,28 @@ out/
 .env.test.local
 .env.production.local
 *.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Secrets and local credentials
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.der
+*.jks
+*.keystore
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+secrets.*
+credentials.*
+token.*
+private.*
 
 # IDE and OS settings
 .vscode/
@@ -33,6 +55,9 @@ user_docs/
 frontend/src/assets/uploads/
 backend/temp/
 backend/logs/
+.playwright-mcp/
+config.local.json
+opencode.local.json
 
 # Optional: Vite / React
 frontend/node_modules/

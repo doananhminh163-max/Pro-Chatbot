@@ -6,145 +6,23 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { parseFrontMatter } from './opencode-control/frontmatter.js';
 import { ensureOpenCodeServer, getDefaultOpenCodeBaseUrl, openCodeJson } from './opencode-control/runtime.js';
+import { buildWorkspaceAppState } from './workspace/presenter.js';
+import type {
+  AgentItem,
+  AppState,
+  AuditItem,
+  CommandItem,
+  ConfigFile,
+  McpServer,
+  PermissionRow,
+  ProviderItem,
+  Risk,
+  RiskQueueItem,
+  SkillItem,
+  StatusTone,
+} from './workspace/types.js';
 
 const execFileAsync = promisify(execFile);
-
-type Risk = 'low' | 'medium' | 'high' | 'critical';
-type StatusTone = 'success' | 'warning' | 'danger' | 'info' | 'neutral';
-
-type Metric = {
-  title: string;
-  value: string;
-  detail: string;
-  tone: StatusTone;
-};
-
-type AuditItem = {
-  action: string;
-  target: string;
-  risk: Risk;
-  status: string;
-  time: string;
-};
-
-type PermissionRow = {
-  tool: string;
-  project: string;
-  global: string;
-  effective: string;
-  risk: Risk;
-};
-
-type ConfigFile = {
-  name: string;
-  path: string;
-  type: 'file' | 'directory';
-  valid: boolean | null;
-};
-
-type AgentItem = {
-  name: string;
-  mode: string;
-  model: string;
-  permissions: string;
-  risk: Risk;
-  description: string;
-  sourcePath: string;
-  builtIn: boolean;
-};
-
-type SkillItem = {
-  name: string;
-  scope: string;
-  source: string;
-  status: string;
-  risk: Risk;
-  description: string;
-};
-
-type MarketplaceItem = {
-  id: string;
-  name: string;
-  source: string;
-  license: string;
-  risk: Risk;
-  description: string;
-};
-
-type McpServer = {
-  name: string;
-  transport: string;
-  status: StatusTone;
-  latency: string;
-  risk: Risk;
-  scope: 'global' | 'project';
-  enabled: boolean;
-  url?: string;
-};
-
-type CommandItem = {
-  name: string;
-  description: string;
-  sourcePath: string;
-  preview: string;
-  source: string;
-  builtIn: boolean;
-  agent?: string;
-  model?: string;
-};
-
-type ProviderItem = {
-  id: string;
-  name: string;
-  source: string;
-};
-
-type RiskQueueItem = {
-  title: string;
-  detail: string;
-  risk: Risk;
-};
-
-type AppState = {
-  generatedAt: string;
-  project: {
-    id: string;
-    name: string;
-    rootPath: string;
-    configPath: string | null;
-    tuiConfigPath: string | null;
-    platform: string;
-    packageName: string | null;
-    packageVersion: string | null;
-  };
-  navBadges: {
-    permissions: number;
-    audit: number;
-  };
-  quickActions: string[];
-  dashboard: {
-    metrics: Metric[];
-    projectStatus: Array<{ label: string; value: string }>;
-    riskQueue: RiskQueueItem[];
-    recentAudit: AuditItem[];
-  };
-  config: {
-    files: ConfigFile[];
-    previewPath: string | null;
-    preview: string;
-    effective: Record<string, unknown> | null;
-  };
-  agents: AgentItem[];
-  permissions: PermissionRow[];
-  skills: SkillItem[];
-  marketplace: MarketplaceItem[];
-  mcpServers: McpServer[];
-  commands: CommandItem[];
-  models: string[];
-  providers: ProviderItem[];
-  audit: AuditItem[];
-  settings: Array<{ title: string; value: string }>;
-};
 
 const TEXT_EXTENSIONS = new Set(['.json', '.jsonc', '.md', '.txt', '.toml', '.yaml', '.yml']);
 
@@ -993,14 +871,6 @@ export async function getWorkspaceAppState(): Promise<AppState> {
     ? await fs.readdir(backupsPath).then((entries) => entries.length).catch(() => 0)
     : 0;
 
-  const invalidConfig = config.files.find((file) => file.valid === false);
-  const validConfigCount = config.files.filter((file) => file.valid === true).length;
-  const configHealth = invalidConfig
-    ? { value: 'Invalid', detail: invalidConfig.name, tone: 'danger' as StatusTone }
-    : validConfigCount > 0
-      ? { value: 'Valid', detail: `${validConfigCount} config file(s) parsed`, tone: 'success' as StatusTone }
-      : { value: 'Missing', detail: 'No OpenCode config found', tone: 'warning' as StatusTone };
-
   const dashboardState = {
     agents,
     permissions,
@@ -1009,90 +879,28 @@ export async function getWorkspaceAppState(): Promise<AppState> {
     audit,
   };
 
-  return {
-    generatedAt: new Date().toISOString(),
-    project: {
-      id: openCodeProject.id,
-      name: openCodeProject.name,
-      rootPath: openCodeProject.rootPath,
-      configPath: config.configPath,
-      tuiConfigPath: config.tuiConfigPath,
-      platform: `${os.platform()} ${os.arch()}`,
-      packageName: typeof packageJson?.name === 'string' ? packageJson.name : null,
-      packageVersion: typeof packageJson?.version === 'string' ? packageJson.version : null,
-    },
-    navBadges: {
-      permissions: permissions.filter((permission) => permission.risk === 'high' || permission.risk === 'critical').length,
-      audit: audit.length,
-    },
-    quickActions: buildQuickActions(dashboardState),
-    dashboard: {
-      metrics: [
-        {
-          title: 'OpenCode server',
-          value: openCodeServer.value,
-          detail: openCodeServer.detail,
-          tone: openCodeServer.tone,
-        },
-        {
-          title: 'Config health',
-          value: configHealth.value,
-          detail: configHealth.detail,
-          tone: configHealth.tone,
-        },
-        {
-          title: 'Risk queue',
-          value: `${riskQueue.length} item(s)`,
-          detail: riskQueue.length ? 'Derived from config, MCP and git status' : 'No active risk items',
-          tone: riskQueue.length ? 'warning' : 'success',
-        },
-        {
-          title: 'Backups',
-          value: `${backupsCount} snapshot(s)`,
-          detail: backupsPath,
-          tone: backupsCount > 0 ? 'info' : 'neutral',
-        },
-      ],
-      projectStatus: [
-        { label: 'Root path', value: root },
-        { label: 'Config path', value: config.configPath ?? 'not found' },
-        { label: 'Platform', value: `${os.platform()} · ${os.arch()}` },
-        { label: 'Package', value: packageJson?.name ? `${packageJson.name}@${packageJson.version ?? 'unknown'}` : 'not found' },
-      ],
-      riskQueue,
-      recentAudit: audit.slice(0, 8),
-    },
-    config: {
-      files: config.files,
-      previewPath: config.previewPath,
-      preview: config.preview,
-      effective: (config.parsedConfig ?? openCodeConfig) as Record<string, unknown> | null,
-    },
+  return buildWorkspaceAppState({
     agents,
-    permissions,
-    skills,
-    marketplace: skills
-      .filter((skill) => skill.scope === 'global')
-      .slice(0, 30)
-      .map((skill) => ({
-        id: `mkt_${crypto.createHash('sha1').update(path.join(skill.source, 'SKILL.md')).digest('hex').slice(0, 10)}`,
-        name: skill.name,
-        source: skill.source,
-        license: 'declared in source',
-        risk: skill.risk,
-        description: skill.description,
-      })),
-    mcpServers,
-    commands,
-    models,
-    providers,
     audit,
-    settings: [
-      { title: 'Backend port', value: process.env.PORT ?? 'not configured' },
-      { title: 'Node environment', value: process.env.NODE_ENV ?? 'not configured' },
-      { title: 'OpenCode server URL', value: getDefaultOpenCodeBaseUrl() },
-      { title: 'Workspace root', value: root },
-      { title: 'Data generated at', value: new Date().toLocaleString('vi-VN') },
-    ],
-  };
+    backupsCount,
+    backupsPath,
+    commands,
+    config,
+    defaultOpenCodeBaseUrl: getDefaultOpenCodeBaseUrl(),
+    generatedAt: new Date().toISOString(),
+    localeTimestamp: new Date().toLocaleString('vi-VN'),
+    mcpServers,
+    models,
+    openCodeConfig: openCodeConfig as Record<string, unknown> | null,
+    openCodeProject,
+    openCodeServer,
+    packageJson,
+    permissions,
+    platform: `${os.platform()} ${os.arch()}`,
+    providers,
+    quickActions: buildQuickActions(dashboardState),
+    riskQueue,
+    root,
+    skills,
+  });
 }

@@ -4,14 +4,21 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { ApiError } from './opencode-control/errors.js';
-import { parseJsonc, readJsonc, stringifyConfig } from './opencode-control/config-file.js';
+import { readJsonc, stringifyConfig } from './opencode-control/config-file.js';
 import { responsePage } from './opencode-control/pagination.js';
-import { ensureOpenCodeServer, openCodeJson, restartOpenCodeServer, type OpenCodeSessionResponse } from './opencode-control/runtime.js';
+import { ensureOpenCodeServer, openCodeJson, type OpenCodeSessionResponse } from './opencode-control/runtime.js';
 import { parseFrontMatter, removeFrontMatter, toYamlLines } from './opencode-control/frontmatter.js';
+import {
+  applyConfigChange,
+  createConfigPatchChange,
+  createFileChange,
+  detectSecrets,
+  redactSecrets,
+  restartOpenCodeForProject,
+  riskFromContent,
+} from './opencode-control/config-change-pipeline.js';
 import type {
   AppStateStore,
-  ConfigBackupRecord,
-  ConfigChangeRecord,
   ConfigFileInfo,
   MarketplaceSkillRecord,
   ProjectRecord,
@@ -33,6 +40,7 @@ export {
   listServerConnections,
   testServerConnection,
 } from './opencode-control/projects.service.js';
+export { applyConfigChange, previewConfigChange } from './opencode-control/config-change-pipeline.js';
 export type { ChangeStatus, ConfigChangeRecord, RiskLevel, StatusTone } from './opencode-control/types.js';
 
 const BUILTIN_TOOLS = [
@@ -70,9 +78,7 @@ const FALLBACK_BUILTIN_COMMANDS = [
   { name: 'help', description: 'Show OpenCode help.', template: 'Show OpenCode help.' },
 ];
 
-const TEXT_EXTENSIONS = new Set(['.json', '.jsonc', '.md', '.txt', '.toml', '.yaml', '.yml']);
 const SECRET_NAME_PATTERN = /(api[_-]?key|token|password|secret|client[_-]?secret)/i;
-const OPENCODE_RESTART_CHANGE_PREFIXES = ['agent.', 'skill.', 'mcp.'];
 const CHANGE_REVIEW_DIFF_LIMIT = 180_000;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -136,49 +142,7 @@ function sanitizeName(name: string, label = 'name') {
   return normalized;
 }
 
-function redactSecrets(input: string) {
-  return input
-    .replace(/("(?:apiKey|api_key|token|password|secret|clientSecret|client_secret)"\s*:\s*)"[^"]*"/gi, '$1"[REDACTED]"')
-    .replace(/((?:API_KEY|TOKEN|PASSWORD|SECRET|CLIENT_SECRET)\s*=\s*).+/gi, '$1[REDACTED]');
-}
-
 const INSTRUCTION_FILE_EXTENSIONS = new Set(['.md', '.txt']);
-
-function shouldRestartOpenCodeForChange(type: string) {
-  return OPENCODE_RESTART_CHANGE_PREFIXES.some((prefix) => type.startsWith(prefix));
-}
-
-async function restartOpenCodeForProject(project: ProjectRecord) {
-  const state = await loadState();
-  const currentProject = state.projects.find((item) => item.id === project.id) ?? project;
-  return restartOpenCodeServer(getDefaultServerConnection(state, currentProject));
-}
-
-function isOpenCodeProjectConfigFile(targetPath: string) {
-  return ['opencode.json', 'opencode.jsonc'].includes(path.basename(targetPath).toLowerCase());
-}
-
-async function syncOpenCodeConfigForProject(
-  state: AppStateStore,
-  project: ProjectRecord,
-  config: Record<string, unknown>,
-) {
-  const connection = getDefaultServerConnection(state, project);
-  const query = new URLSearchParams({ directory: project.rootPath }).toString();
-  try {
-    await ensureOpenCodeServer(connection);
-    await openCodeJson<Record<string, unknown>>(`/config?${query}`, {
-      method: 'PATCH',
-      body: JSON.stringify(config),
-    }, connection, 10000);
-    return { ok: true as const };
-  } catch (error) {
-    return {
-      ok: false as const,
-      error: error instanceof Error ? error.message : 'OpenCode runtime sync failed',
-    };
-  }
-}
 
 function stripAnsi(input: string) {
   return input.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '');
@@ -198,137 +162,6 @@ function findRemovableSkillRoot(project: ProjectRecord, skillDir: string) {
   return removableSkillRoots(project)
     .map((root) => path.resolve(root))
     .find((root) => isInside(root, normalizedSkillDir));
-}
-
-function makeUnifiedDiff(before: string, after: string, fromPath: string, toPath = fromPath) {
-  const beforeLines = before.split(/\r?\n/);
-  const afterLines = after.split(/\r?\n/);
-  const lines = [`--- ${fromPath}`, `+++ ${toPath}`];
-  const max = Math.max(beforeLines.length, afterLines.length);
-
-  for (let index = 0; index < max; index += 1) {
-    const beforeLine = beforeLines[index];
-    const afterLine = afterLines[index];
-    if (beforeLine === afterLine) {
-      if (beforeLine !== undefined) lines.push(` ${beforeLine}`);
-    } else {
-      if (beforeLine !== undefined) lines.push(`-${beforeLine}`);
-      if (afterLine !== undefined) lines.push(`+${afterLine}`);
-    }
-  }
-
-  return redactSecrets(lines.join('\n'));
-}
-
-function detectSecrets(content: string) {
-  const warnings: Array<{ code: string; message: string }> = [];
-  const redacted = redactSecrets(content);
-  if (redacted !== content && !content.includes('{env:') && !content.includes('{file:')) {
-    warnings.push({
-      code: 'SECRET_PLAINTEXT_BLOCKED',
-      message: 'A secret-like value was detected. Use {env:NAME} or {file:path} references.',
-    });
-  }
-  return warnings;
-}
-
-function riskFromContent(type: string, targetFile: string, content: string, patch?: unknown): RiskLevel {
-  const normalized = `${type} ${targetFile} ${JSON.stringify(patch ?? {})} ${content}`.toLowerCase();
-  if (detectSecrets(content).length > 0) return 'critical';
-  if (normalized.includes('"*"') || normalized.includes('*:') || /permission[^]*allow/.test(normalized) && /(bash|shell|exec|edit|write)/.test(normalized)) {
-    return 'critical';
-  }
-  if (/(bash|edit|write|delete|remote|mcp|marketplace|install)/.test(normalized)) {
-    return 'high';
-  }
-  if (/(skill|command|model|provider|agent|server)/.test(normalized)) {
-    return 'medium';
-  }
-  return 'low';
-}
-
-function warningFromRisk(riskLevel: RiskLevel, type: string) {
-  const warnings: Array<{ code: string; message: string }> = [];
-  if (riskLevel === 'high' || riskLevel === 'critical') {
-    warnings.push({
-      code: 'RISK_CONFIRMATION_REQUIRED',
-      message: `${type} is a ${riskLevel}-risk change and requires explicit confirmation before apply.`,
-    });
-  }
-  return warnings;
-}
-
-async function createFileChange(input: {
-  state: AppStateStore;
-  project: ProjectRecord;
-  type: string;
-  summary: string;
-  targetFile: string;
-  afterContent: string;
-  patch?: unknown;
-}) {
-  const targetPath = resolveProjectPath(input.project, input.targetFile, { allowMissing: true });
-  const beforeContent = await pathExists(targetPath) ? await readText(targetPath) : '';
-  const relativePath = toProjectRelative(input.project, targetPath);
-  const riskLevel = riskFromContent(input.type, relativePath, input.afterContent, input.patch);
-  const warnings = [...detectSecrets(input.afterContent), ...warningFromRisk(riskLevel, input.type)];
-  const change: ConfigChangeRecord = {
-    id: makeId('chg'),
-    projectId: input.project.id,
-    type: input.type,
-    summary: input.summary,
-    targetFile: relativePath,
-    diff: makeUnifiedDiff(beforeContent, input.afterContent, relativePath),
-    riskLevel,
-    status: 'previewed',
-    warnings,
-    createdAt: now(),
-    beforeContent,
-    afterContent: input.afterContent,
-  };
-
-  input.state.configChanges.unshift(change);
-  input.state.auditLogs.unshift({
-    id: makeId('audit'),
-    configChangeId: change.id,
-    actor: 'local-user',
-    action: 'preview',
-    targetType: 'config',
-    targetId: relativePath,
-    metadata: { type: input.type, riskLevel },
-    createdAt: now(),
-  });
-
-  await saveState(input.state);
-  return change;
-}
-
-async function createConfigPatchChange(input: {
-  projectId: string;
-  type: string;
-  summary: string;
-  targetFile?: string;
-  patch: Record<string, unknown>;
-}) {
-  const state = await loadState();
-  const project = assertProject(state, input.projectId);
-  const targetFile = input.targetFile ?? (project.configPath ? toProjectRelative(project, project.configPath) : 'opencode.json');
-  const targetPath = resolveProjectPath(project, targetFile, { allowMissing: true });
-  const currentConfig = await pathExists(targetPath)
-    ? await readJsonc(targetPath).catch((error) => {
-      throw new ApiError(422, 'CONFIG_PARSE_ERROR', 'Could not parse current config before creating preview', error);
-    })
-    : {};
-  const mergedConfig = removeUndefinedKeys(deepMerge(currentConfig as Record<string, unknown>, input.patch)) as Record<string, unknown>;
-  return createFileChange({
-    state,
-    project,
-    type: input.type,
-    summary: input.summary,
-    targetFile,
-    afterContent: stringifyConfig(mergedConfig),
-    patch: input.patch,
-  });
 }
 
 async function collectConfigFile(project: ProjectRecord, filePath: string, kind: ConfigFileInfo['kind']): Promise<ConfigFileInfo> {
@@ -373,117 +206,6 @@ export async function readProjectConfig(projectId: string, scope = 'project') {
   }
 
   return { projectId: project.id, scope, files };
-}
-
-export async function previewConfigChange(projectId: string, input: {
-  type?: string;
-  targetFile?: string;
-  patch?: Record<string, unknown>;
-  content?: string;
-  summary?: string;
-}) {
-  if (input.content !== undefined) {
-    const state = await loadState();
-    const project = assertProject(state, projectId);
-    return createFileChange({
-      state,
-      project,
-      type: input.type ?? 'config.update',
-      summary: input.summary ?? 'Update config file',
-      targetFile: input.targetFile ?? (project.configPath ? toProjectRelative(project, project.configPath) : 'opencode.json'),
-      afterContent: input.content,
-    });
-  }
-
-  if (!input.patch || !isPlainObject(input.patch)) {
-    throw new ApiError(400, 'VALIDATION_ERROR', 'patch or content is required');
-  }
-
-  return createConfigPatchChange({
-    projectId,
-    type: input.type ?? 'config.update',
-    summary: input.summary ?? 'Update OpenCode config',
-    targetFile: input.targetFile,
-    patch: input.patch,
-  });
-}
-
-export async function applyConfigChange(configChangeId: string, input: { confirmed?: boolean; confirmationText?: string }) {
-  const state = await loadState();
-  const change = state.configChanges.find((item) => item.id === configChangeId);
-  if (!change) {
-    throw new ApiError(404, 'CONFIG_CHANGE_NOT_FOUND', 'Config change not found');
-  }
-  if (change.status !== 'previewed') {
-    throw new ApiError(409, 'CONFIG_CHANGE_NOT_PREVIEWED', 'Only previewed changes can be applied');
-  }
-  if ((change.riskLevel === 'high' || change.riskLevel === 'critical') && !input.confirmed && input.confirmationText !== 'I understand the risk') {
-    throw new ApiError(403, 'RISK_CONFIRMATION_REQUIRED', 'High-risk changes require confirmation');
-  }
-  if (!change.targetFile || change.afterContent === undefined) {
-    throw new ApiError(422, 'CONFIG_CHANGE_INVALID', 'Config change has no target content');
-  }
-
-  const project = assertProject(state, change.projectId);
-  const targetPath = resolveProjectPath(project, change.targetFile, { allowMissing: true });
-  const beforeContent = await pathExists(targetPath) ? await readText(targetPath) : '';
-  let parsedJsonConfig: unknown;
-
-  if (TEXT_EXTENSIONS.has(path.extname(targetPath).toLowerCase()) && ['.json', '.jsonc'].includes(path.extname(targetPath).toLowerCase())) {
-    try {
-      parsedJsonConfig = parseJsonc(change.afterContent);
-    } catch (error) {
-      change.status = 'failed';
-      await saveState(state);
-      throw new ApiError(422, 'CONFIG_PARSE_ERROR', 'Proposed config is not valid JSON/JSONC', error);
-    }
-  }
-
-  const backupDir = path.join(getStateDirectory(), 'backups', project.id);
-  await fs.mkdir(backupDir, { recursive: true });
-  const backupPath = path.join(backupDir, `${new Date().toISOString().replace(/[:.]/g, '-')}-${path.basename(targetPath)}.bak`);
-  await fs.writeFile(backupPath, beforeContent, 'utf8');
-  await writeAtomic(targetPath, change.afterContent);
-
-  const backup: ConfigBackupRecord = {
-    id: makeId('bak'),
-    projectId: project.id,
-    configChangeId: change.id,
-    filePath: toProjectRelative(project, targetPath),
-    backupPath,
-    createdAt: now(),
-  };
-  state.backups.unshift(backup);
-  change.status = 'applied';
-  change.appliedAt = now();
-  state.auditLogs.unshift({
-    id: makeId('audit'),
-    configChangeId: change.id,
-    actor: 'local-user',
-    action: 'apply',
-    targetType: 'config',
-    targetId: change.targetFile,
-    metadata: { riskLevel: change.riskLevel, backupId: backup.id },
-    createdAt: now(),
-  });
-  await saveState(state);
-  const openCodeSync = isOpenCodeProjectConfigFile(targetPath) && isPlainObject(parsedJsonConfig)
-    ? await syncOpenCodeConfigForProject(state, project, parsedJsonConfig)
-    : undefined;
-  const openCodeRestart = shouldRestartOpenCodeForChange(change.type)
-    ? await restartOpenCodeForProject(project)
-    : undefined;
-
-  return {
-    configChangeId: change.id,
-    status: change.status,
-    backups: [backup],
-    verifyResult: openCodeSync?.ok === false
-      ? { ok: false, error: openCodeSync.error }
-      : { ok: true },
-    ...(openCodeSync ? { openCodeSync } : {}),
-    ...(openCodeRestart ? { openCodeRestart } : {}),
-  };
 }
 
 export async function uploadInstructionFiles(projectId: string, files: Array<{ originalname: string; buffer: Buffer }>) {

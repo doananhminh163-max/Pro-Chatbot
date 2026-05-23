@@ -44,9 +44,9 @@ export function MainHeader({
             <span>Review changes</span>
           </button>
         )}
-        <button className="toolbar-button" type="button" aria-label="Setting" onClick={onOpenSettings}>
+        <button className="toolbar-button" type="button" aria-label="Settings" onClick={onOpenSettings}>
           <Settings size={17} />
-          <span>Setting</span>
+          <span>Settings</span>
         </button>
       </div>
     </header>

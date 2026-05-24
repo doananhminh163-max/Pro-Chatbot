@@ -50,7 +50,6 @@ Thumbs.db
 *.swp
 
 # Project specific
-user_docs/
 .pro-chatbot/
 frontend/src/assets/uploads/
 backend/temp/
